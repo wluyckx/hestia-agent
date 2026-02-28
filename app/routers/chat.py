@@ -31,6 +31,7 @@ from app.config import Settings
 from app.dependencies import get_current_user, get_db, get_settings
 from app.models import ChatRequest
 from app.prompts import build_system_prompt
+from app.tools.cross_domain import register_cross_domain_tools
 from app.tools.energy import register_energy_tools
 from app.tools.mealie import register_mealie_tools
 from app.tools.registry import ToolError, create_default_registry
@@ -118,6 +119,7 @@ async def chat(
     register_energy_tools(registry, settings)
     register_mealie_tools(registry, settings)
     register_shopping_tools(registry, settings)
+    register_cross_domain_tools(registry, settings)
     tool_defs = registry.get_definitions()
     tool_descriptions = registry.get_tool_descriptions()
     system_prompt = build_system_prompt(backend_data, tool_descriptions)

@@ -4,6 +4,7 @@ Verifies that the tool-use framework supports Claude chaining
 multiple tools from different domains in a single conversation turn.
 
 CHANGELOG:
+- 2026-02-28: Add generate_shopping_list_from_meal_plan tests (STORY-040)
 - 2026-02-28: Initial creation — 3 cross-domain scenarios (STORY-041)
 """
 
@@ -11,6 +12,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from app.backends import BackendData
@@ -272,3 +274,150 @@ async def test_scenario_spend_and_tariff(initialized_client):
     lines = [line for line in resp.text.strip().split("\n\n") if line.startswith("data: ")]
     text_chunk = json.loads(lines[0].removeprefix("data: "))
     assert "452.30" in text_chunk["token"]
+
+
+# ---- STORY-040: generate_shopping_list_from_meal_plan ----
+
+
+class _MockResponse:
+    """Mock httpx response."""
+
+    def __init__(self, json_data, status_code=200):
+        self._json = json_data
+        self.status_code = status_code
+
+    def json(self):
+        return self._json
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise httpx.HTTPStatusError(
+                "error",
+                request=httpx.Request("GET", "http://test"),
+                response=httpx.Response(self.status_code),
+            )
+
+
+@pytest.mark.asyncio
+async def test_generate_shopping_list_full_flow():
+    """Test the full meal plan → ingredients → shopping list flow."""
+    from app.tools.cross_domain import _generate_shopping_list_from_meal_plan
+
+    # Mock settings
+    settings = MagicMock()
+    settings.mealie_token = "test-token"
+    settings.mealie_base_url = "http://mealie:9000"
+
+    # Define responses for each API call in order
+    meal_plan_response = _MockResponse(
+        [
+            {
+                "recipe": {"name": "Pasta Bolognese", "slug": "pasta-bolognese"},
+                "entry_type": "dinner",
+            },
+            {
+                "recipe": {"name": "Caesar Salad", "slug": "caesar-salad"},
+                "entry_type": "lunch",
+            },
+        ]
+    )
+
+    pasta_response = _MockResponse(
+        {
+            "name": "Pasta Bolognese",
+            "recipeIngredient": [
+                {"note": "500g spaghetti"},
+                {"note": "400g ground beef"},
+                {"note": "1 onion"},
+            ],
+        }
+    )
+
+    salad_response = _MockResponse(
+        {
+            "name": "Caesar Salad",
+            "recipeIngredient": [
+                {"note": "1 head romaine lettuce"},
+                {"note": "1 onion"},  # duplicate with pasta
+            ],
+        }
+    )
+
+    lists_response = _MockResponse([{"id": "list-123", "name": "Shopping"}])
+
+    # Track POST calls for items
+    post_items = []
+
+    def mock_get(url, **kwargs):
+        if "mealplans/today" in url:
+            return meal_plan_response
+        if "pasta-bolognese" in url:
+            return pasta_response
+        if "caesar-salad" in url:
+            return salad_response
+        if "shopping/lists" in url:
+            return lists_response
+        return _MockResponse({})
+
+    def mock_post(url, **kwargs):
+        if "items" in url:
+            post_items.append(kwargs.get("json", {}))
+            return _MockResponse({"id": "item-1"})
+        return _MockResponse({})
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(side_effect=mock_get)
+    mock_client.post = AsyncMock(side_effect=mock_post)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("app.tools.cross_domain.httpx.AsyncClient", return_value=mock_client):
+        result = await _generate_shopping_list_from_meal_plan(settings)
+
+    assert result["success"] is True
+    assert result["list_id"] == "list-123"
+    assert "Pasta Bolognese" in result["recipes_processed"]
+    assert "Caesar Salad" in result["recipes_processed"]
+    # 4 unique ingredients (onion consolidated)
+    assert result["items_added"] == 4
+
+    # Verify onion was consolidated with both recipe names
+    onion_items = [item for item in result["items"] if item["ingredient"] == "1 onion"]
+    assert len(onion_items) == 1
+    assert "Pasta Bolognese" in onion_items[0]["recipes"]
+    assert "Caesar Salad" in onion_items[0]["recipes"]
+
+
+@pytest.mark.asyncio
+async def test_generate_shopping_list_no_recipes():
+    """No recipes in meal plan returns error."""
+    from app.tools.cross_domain import _generate_shopping_list_from_meal_plan
+
+    settings = MagicMock()
+    settings.mealie_token = "test-token"
+    settings.mealie_base_url = "http://mealie:9000"
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=_MockResponse([]))
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("app.tools.cross_domain.httpx.AsyncClient", return_value=mock_client):
+        result = await _generate_shopping_list_from_meal_plan(settings)
+
+    assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_register_cross_domain_tools():
+    """Verify cross-domain tool is registered."""
+    from app.tools.cross_domain import register_cross_domain_tools
+    from app.tools.registry import ToolRegistry
+
+    registry = ToolRegistry()
+    settings = MagicMock()
+    register_cross_domain_tools(registry, settings)
+
+    defs = registry.get_definitions()
+    assert len(defs) == 1
+    assert defs[0]["name"] == "generate_shopping_list_from_meal_plan"
