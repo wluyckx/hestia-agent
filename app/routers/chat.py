@@ -89,8 +89,14 @@ async def chat(
     await _ensure_conversation(db, body.conversation_id, user, body.message)
     await _persist_message(db, body.conversation_id, "user", body.message)
 
-    # Build messages for Claude
-    messages = [{"role": h.role, "content": h.content} for h in body.history[-50:]]
+    # Build messages for Claude — map PWA "agent" role to Anthropic "assistant"
+    def _map_role(role: str) -> str:
+        return "assistant" if role == "agent" else role
+
+    messages = [
+        {"role": _map_role(h.role), "content": h.content}
+        for h in body.history[-50:]
+    ]
     messages.append({"role": "user", "content": body.message})
 
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)

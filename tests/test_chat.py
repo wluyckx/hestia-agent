@@ -130,6 +130,36 @@ async def test_chat_persists_messages(initialized_client):
 
 
 @pytest.mark.asyncio
+async def test_chat_maps_agent_role_to_assistant(initialized_client):
+    """PWA sends role 'agent' but Anthropic API expects 'assistant'."""
+    mock_client = MagicMock()
+    mock_messages = MagicMock()
+    mock_client.messages = mock_messages
+    mock_messages.stream = MagicMock(return_value=MockStreamContext(["Ok"]))
+
+    with patch("app.routers.chat.anthropic.AsyncAnthropic", return_value=mock_client):
+        await initialized_client.post(
+            "/chat",
+            json={
+                "message": "Follow-up",
+                "conversation_id": "role-map-test",
+                "history": [
+                    {"role": "user", "content": "Hello"},
+                    {"role": "agent", "content": "Hi there"},
+                ],
+            },
+            headers=auth_headers(),
+        )
+
+    # Verify the messages passed to Anthropic have "assistant" not "agent"
+    call_kwargs = mock_messages.stream.call_args[1]
+    msgs = call_kwargs["messages"]
+    assert msgs[0] == {"role": "user", "content": "Hello"}
+    assert msgs[1] == {"role": "assistant", "content": "Hi there"}
+    assert msgs[2] == {"role": "user", "content": "Follow-up"}
+
+
+@pytest.mark.asyncio
 async def test_chat_requires_auth(initialized_client):
     resp = await initialized_client.post(
         "/chat",
