@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     # Whisper
     whisper_base_url: str = "http://whisper:9000"
 
+    # Backend APIs (Docker network URLs + auth tokens)
+    energy_base_url: str = "http://p1-api:8000"
+    energy_token: str = ""
+    solar_base_url: str = "http://sungrow-api:8002"
+    solar_token: str = ""
+    shopping_base_url: str = "http://shopping-api:8080"
+    shopping_api_key: str = ""
+    mealie_base_url: str = "http://mealie:9000"
+    mealie_token: str = ""
+
     # Database
     database_path: str = "data/hestia.db"
 

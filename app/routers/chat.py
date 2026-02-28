@@ -15,13 +15,14 @@ import anthropic
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
+from app.backends import build_context_block, fetch_all
 from app.config import Settings
 from app.dependencies import get_current_user, get_db, get_settings
 from app.models import ChatRequest
 
 router = APIRouter(tags=["chat"])
 
-SYSTEM_PROMPT = (
+SYSTEM_PROMPT_BASE = (
     "You are Hestia, a helpful personal assistant for a Belgian family. "
     "You help with meal planning, shopping, energy monitoring, and daily life. "
     "Be concise, friendly, and practical. Respond in the same language the user writes in."
@@ -89,14 +90,16 @@ async def chat(
     await _ensure_conversation(db, body.conversation_id, user, body.message)
     await _persist_message(db, body.conversation_id, "user", body.message)
 
+    # Fetch live backend data for system prompt
+    backend_data = await fetch_all(settings)
+    context_block = build_context_block(backend_data)
+    system_prompt = SYSTEM_PROMPT_BASE + context_block
+
     # Build messages for Claude — map PWA "agent" role to Anthropic "assistant"
     def _map_role(role: str) -> str:
         return "assistant" if role == "agent" else role
 
-    messages = [
-        {"role": _map_role(h.role), "content": h.content}
-        for h in body.history[-50:]
-    ]
+    messages = [{"role": _map_role(h.role), "content": h.content} for h in body.history[-50:]]
     messages.append({"role": "user", "content": body.message})
 
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
@@ -107,7 +110,7 @@ async def chat(
             async with client.messages.stream(
                 model=settings.claude_model,
                 max_tokens=4096,
-                system=SYSTEM_PROMPT,
+                system=system_prompt,
                 messages=messages,
             ) as stream:
                 async for text in stream.text_stream:
