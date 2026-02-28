@@ -52,7 +52,7 @@ async def test_greeting_with_live_data(initialized_client):
     mock_dt = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
     mock_data = BackendData(
         energy={"power_w": 1500},
-        solar={"solar_power_w": 3200, "battery_soc": 85, "daily_solar_kwh": 12.5},
+        solar={"pv_power_w": 3200, "battery_soc_pct": 85, "pv_daily_kwh": 12.5},
         spending={"total_cents": 45230, "currency": "EUR"},
         meals=[
             {

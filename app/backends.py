@@ -35,6 +35,7 @@ async def fetch_energy(settings: Settings) -> dict | None:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.get(
                 f"{settings.energy_base_url}/v1/realtime",
+                params={"device_id": settings.energy_device_id},
                 headers={"Authorization": f"Bearer {settings.energy_token}"},
             )
             resp.raise_for_status()
@@ -52,6 +53,7 @@ async def fetch_solar(settings: Settings) -> dict | None:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.get(
                 f"{settings.solar_base_url}/v1/realtime",
+                params={"device_id": settings.solar_device_id},
                 headers={"Authorization": f"Bearer {settings.solar_token}"},
             )
             resp.raise_for_status()
@@ -119,9 +121,9 @@ def build_context_block(data: BackendData) -> str:
         sections.append(f"- Current power consumption: {power}W")
 
     if data.solar:
-        solar_w = data.solar.get("solar_power_w", "?")
-        battery = data.solar.get("battery_soc", "?")
-        daily = data.solar.get("daily_solar_kwh", "?")
+        solar_w = data.solar.get("pv_power_w", "?")
+        battery = data.solar.get("battery_soc_pct", "?")
+        daily = data.solar.get("pv_daily_kwh", "?")
         sections.append(
             f"- Solar production: {solar_w}W, battery: {battery}%, daily solar: {daily} kWh"
         )

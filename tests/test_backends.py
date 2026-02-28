@@ -81,9 +81,9 @@ async def test_fetch_solar_success():
     mock_client = AsyncMock()
     mock_client.get.return_value = _mock_response(
         {
-            "solar_power_w": 3200,
-            "battery_soc": 85,
-            "daily_solar_kwh": 12.5,
+            "pv_power_w": 3200,
+            "battery_soc_pct": 85,
+            "pv_daily_kwh": 12.5,
         }
     )
 
@@ -92,8 +92,8 @@ async def test_fetch_solar_success():
         mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
         result = await fetch_solar(_settings())
 
-    assert result["solar_power_w"] == 3200
-    assert result["battery_soc"] == 85
+    assert result["pv_power_w"] == 3200
+    assert result["battery_soc_pct"] == 85
 
 
 @pytest.mark.asyncio
@@ -145,9 +145,9 @@ async def test_fetch_all_concurrent():
     ):
         e.return_value = {"power_w": 1000}
         s.return_value = {
-            "solar_power_w": 2000,
-            "battery_soc": 50,
-            "daily_solar_kwh": 8.0,
+            "pv_power_w": 2000,
+            "battery_soc_pct": 50,
+            "pv_daily_kwh": 8.0,
         }
         sp.return_value = {"total_cents": 30000, "currency": "EUR"}
         m.return_value = [{"recipe": {"name": "Stew", "slug": "stew"}}]
@@ -155,7 +155,7 @@ async def test_fetch_all_concurrent():
         result = await fetch_all(_settings())
 
     assert result.energy["power_w"] == 1000
-    assert result.solar["solar_power_w"] == 2000
+    assert result.solar["pv_power_w"] == 2000
     assert result.spending["total_cents"] == 30000
     assert result.meals[0]["recipe"]["name"] == "Stew"
 
@@ -164,9 +164,9 @@ def test_build_context_block_full():
     data = BackendData(
         energy={"power_w": 1500},
         solar={
-            "solar_power_w": 3200,
-            "battery_soc": 85,
-            "daily_solar_kwh": 12.5,
+            "pv_power_w": 3200,
+            "battery_soc_pct": 85,
+            "pv_daily_kwh": 12.5,
         },
         spending={"total_cents": 45230, "currency": "EUR"},
         meals=[{"recipe": {"name": "Pasta Bolognese"}}],

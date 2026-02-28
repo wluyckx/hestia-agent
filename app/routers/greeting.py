@@ -48,10 +48,10 @@ async def greeting(
     if data.energy:
         power_w = data.energy.get("power_w", 0)
     if data.solar:
-        daily_solar_kwh = data.solar.get("daily_solar_kwh", 0.0)
-        battery_soc = data.solar.get("battery_soc", 0)
+        daily_solar_kwh = data.solar.get("pv_daily_kwh", 0.0)
+        battery_soc = data.solar.get("battery_soc_pct", 0)
         if not data.energy:
-            power_w = data.solar.get("solar_power_w", 0)
+            power_w = data.solar.get("pv_power_w", 0)
 
     energy = EnergyInfo(
         power_w=power_w,
