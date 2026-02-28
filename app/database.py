@@ -4,6 +4,7 @@ SQLite database initialisation and connection factory.
 Creates tables on startup, enables WAL mode and foreign keys.
 
 CHANGELOG:
+- 2026-02-28: Add summary column to conversations (STORY-046)
 - 2026-02-28: Add preferences table (STORY-045)
 """
 
@@ -14,6 +15,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     id          TEXT PRIMARY KEY,
     user_id     TEXT NOT NULL,
     title       TEXT NOT NULL DEFAULT '',
+    summary     TEXT DEFAULT NULL,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
