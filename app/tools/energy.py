@@ -1,12 +1,14 @@
 """
 Energy & solar tool handlers for Claude tool-use.
 
-Provides three tools:
+Provides four tools:
 - get_energy_realtime: real-time P1 smart meter data
 - get_solar_status: solar panel production & battery status
 - get_tariff_comparison: Belgian energy tariff comparison
+- get_capacity_peaks: Belgian capacity tariff peak tracking (kwartierpiek)
 
 CHANGELOG:
+- 2026-02-28: Add capacity tariff peak tracking tool (STORY-044)
 - 2026-02-28: Initial creation — energy tools (STORY-036)
 """
 
@@ -88,6 +90,24 @@ async def _get_tariff_comparison(settings: Settings) -> dict:
         return {"error": "Tariff comparison unavailable"}
 
 
+async def _get_capacity_peaks(settings: Settings) -> dict:
+    """Fetch the current month's capacity tariff peaks (kwartierpiek)."""
+    if not settings.energy_token:
+        return {"error": "Capacity peak data unavailable"}
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.get(
+                f"{settings.energy_base_url}/v1/capacity/peaks",
+                params={"device_id": settings.energy_device_id},
+                headers={"Authorization": f"Bearer {settings.energy_token}"},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception:
+        logger.warning("Failed to fetch capacity peak data", exc_info=True)
+        return {"error": "Capacity peak data unavailable"}
+
+
 def register_energy_tools(registry: ToolRegistry, settings: Settings) -> None:
     """Register all energy/solar tools into the given registry.
 
@@ -104,6 +124,9 @@ def register_energy_tools(registry: ToolRegistry, settings: Settings) -> None:
 
     async def tariff_comparison_handler() -> dict:
         return await _get_tariff_comparison(settings)
+
+    async def capacity_peaks_handler() -> dict:
+        return await _get_capacity_peaks(settings)
 
     registry.register(
         name="get_energy_realtime",
@@ -124,4 +147,14 @@ def register_energy_tools(registry: ToolRegistry, settings: Settings) -> None:
         description="Compare current energy tariff with alternatives from the Belgian Energy API",
         parameters={"type": "object", "properties": {}},
         handler=tariff_comparison_handler,
+    )
+
+    registry.register(
+        name="get_capacity_peaks",
+        description=(
+            "Get the current month's capacity tariff peaks (kwartierpiek) "
+            "and projected annual cost impact for Belgian households"
+        ),
+        parameters={"type": "object", "properties": {}},
+        handler=capacity_peaks_handler,
     )

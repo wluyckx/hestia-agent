@@ -1,7 +1,8 @@
 """
-Tests for Mealie tool-use tools — search, meal plan, shopping, recipe detail.
+Tests for Mealie tool-use tools — read + write operations.
 
 CHANGELOG:
+- 2026-02-28: Add write tool tests (STORY-039)
 - 2026-02-28: Initial creation — 7 tests (STORY-037)
 """
 
@@ -11,9 +12,13 @@ import pytest
 
 from app.config import Settings
 from app.tools.mealie import (
+    _add_to_shopping_list,
+    _create_meal_plan_entry,
     _get_meal_plan,
     _get_recipe_detail,
     _get_shopping_list,
+    _import_recipe_from_url,
+    _remove_from_shopping_list,
     _search_recipes,
     register_mealie_tools,
 )
@@ -231,22 +236,197 @@ class TestGetRecipeDetail:
         assert result == {"error": "Recipe not found"}
 
 
+class TestCreateMealPlanEntry:
+    """Verify create_meal_plan_entry tool."""
+
+    @pytest.mark.asyncio
+    async def test_create_meal_plan_entry_success(self):
+        """Mock POST — verify body sent and success response."""
+        mock_client = AsyncMock()
+        mock_client.post.return_value = _mock_response({"id": "plan-123"})
+
+        with patch("app.tools.mealie.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await _create_meal_plan_entry(
+                _settings(),
+                date="2026-03-01",
+                entry_type="dinner",
+                recipe_slug="spaghetti-bolognese",
+            )
+
+        assert result == {
+            "success": True,
+            "date": "2026-03-01",
+            "entry_type": "dinner",
+            "recipe_slug": "spaghetti-bolognese",
+        }
+        mock_client.post.assert_called_once()
+        call_kwargs = mock_client.post.call_args
+        assert call_kwargs.kwargs["json"] == {
+            "date": "2026-03-01",
+            "entryType": "dinner",
+            "recipeId": "spaghetti-bolognese",
+        }
+
+    @pytest.mark.asyncio
+    async def test_create_meal_plan_entry_failure(self):
+        """Verify error dict on API failure."""
+        mock_client = AsyncMock()
+        mock_client.post.return_value = _mock_response({}, status_code=500)
+
+        with patch("app.tools.mealie.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await _create_meal_plan_entry(
+                _settings(),
+                date="2026-03-01",
+                entry_type="dinner",
+                recipe_slug="bad-slug",
+            )
+
+        assert result == {"error": "Failed to create meal plan entry"}
+
+
+class TestAddToShoppingList:
+    """Verify add_to_shopping_list tool."""
+
+    @pytest.mark.asyncio
+    async def test_add_to_shopping_list_success(self):
+        """Mock GET lists + POST item — verify two-step flow."""
+        mock_client = AsyncMock()
+
+        # First call: GET lists
+        lists_response = _mock_response(
+            {"items": [{"id": "list-abc-123", "name": "Weekly Groceries"}]}
+        )
+        # Second call: POST item
+        item_response = _mock_response({"id": "item-456", "note": "Milk 1L"})
+        mock_client.get.return_value = lists_response
+        mock_client.post.return_value = item_response
+
+        with patch("app.tools.mealie.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await _add_to_shopping_list(_settings(), note="Milk 1L", quantity=2)
+
+        assert result == {
+            "success": True,
+            "item": "Milk 1L",
+            "list_id": "list-abc-123",
+        }
+        mock_client.get.assert_called_once()
+        mock_client.post.assert_called_once()
+        post_kwargs = mock_client.post.call_args
+        assert post_kwargs.kwargs["json"] == {"note": "Milk 1L", "quantity": 2}
+
+    @pytest.mark.asyncio
+    async def test_add_to_shopping_list_failure(self):
+        """Verify error dict when no lists found."""
+        mock_client = AsyncMock()
+        mock_client.get.return_value = _mock_response({"items": []})
+
+        with patch("app.tools.mealie.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await _add_to_shopping_list(_settings(), note="Milk 1L")
+
+        assert result == {"error": "Failed to add item to shopping list"}
+
+
+class TestRemoveFromShoppingList:
+    """Verify remove_from_shopping_list tool."""
+
+    @pytest.mark.asyncio
+    async def test_remove_from_shopping_list_success(self):
+        """Mock DELETE — verify success response."""
+        mock_client = AsyncMock()
+        mock_client.delete.return_value = _mock_response(None)
+
+        with patch("app.tools.mealie.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await _remove_from_shopping_list(_settings(), item_id="item-789")
+
+        assert result == {"success": True, "removed_item_id": "item-789"}
+        mock_client.delete.assert_called_once()
+        call_args = mock_client.delete.call_args
+        assert "items/item-789" in call_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_remove_from_shopping_list_failure(self):
+        """Verify error dict on 404."""
+        mock_client = AsyncMock()
+        mock_client.delete.return_value = _mock_response({}, status_code=404)
+
+        with patch("app.tools.mealie.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await _remove_from_shopping_list(_settings(), item_id="nonexistent")
+
+        assert result == {"error": "Failed to remove item"}
+
+
+class TestImportRecipeFromUrl:
+    """Verify import_recipe_from_url tool."""
+
+    @pytest.mark.asyncio
+    async def test_import_recipe_from_url_success(self):
+        """Mock POST — verify URL in body and slug extraction."""
+        mock_client = AsyncMock()
+        mock_client.post.return_value = _mock_response("imported-recipe-slug")
+
+        with patch("app.tools.mealie.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await _import_recipe_from_url(
+                _settings(), url="https://example.com/recipe/pasta"
+            )
+
+        assert result == {"success": True, "slug": "imported-recipe-slug"}
+        mock_client.post.assert_called_once()
+        post_kwargs = mock_client.post.call_args
+        assert post_kwargs.kwargs["json"] == {
+            "url": "https://example.com/recipe/pasta",
+            "includeTags": False,
+        }
+
+    @pytest.mark.asyncio
+    async def test_import_recipe_from_url_failure(self):
+        """Verify error dict on API failure."""
+        mock_client = AsyncMock()
+        mock_client.post.return_value = _mock_response({}, status_code=500)
+
+        with patch("app.tools.mealie.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await _import_recipe_from_url(_settings(), url="https://bad.com/nope")
+
+        assert result == {"error": "Failed to import recipe"}
+
+
 class TestRegisterMealieTools:
     """Verify tool registration."""
 
     def test_register_mealie_tools(self):
-        """Verify all 4 tools appear in registry after registration."""
+        """Verify all 8 tools appear in registry after registration."""
         registry = ToolRegistry()
         register_mealie_tools(registry, _settings())
 
         defs = registry.get_definitions()
         names = {d["name"] for d in defs}
 
-        assert len(defs) == 4
+        assert len(defs) == 8
+        # Read tools
         assert "search_recipes" in names
         assert "get_meal_plan" in names
         assert "get_shopping_list" in names
         assert "get_recipe_detail" in names
+        # Write tools
+        assert "create_meal_plan_entry" in names
+        assert "add_to_shopping_list" in names
+        assert "remove_from_shopping_list" in names
+        assert "import_recipe_from_url" in names
 
         # Verify search_recipes has required query param
         search_def = next(d for d in defs if d["name"] == "search_recipes")
@@ -257,3 +437,21 @@ class TestRegisterMealieTools:
         detail_def = next(d for d in defs if d["name"] == "get_recipe_detail")
         assert "slug" in detail_def["input_schema"]["properties"]
         assert "slug" in detail_def["input_schema"]["required"]
+
+        # Verify create_meal_plan_entry has all 3 required params
+        mp_def = next(d for d in defs if d["name"] == "create_meal_plan_entry")
+        assert set(mp_def["input_schema"]["required"]) == {
+            "date",
+            "entry_type",
+            "recipe_slug",
+        }
+
+        # Verify add_to_shopping_list has required note, optional quantity
+        add_def = next(d for d in defs if d["name"] == "add_to_shopping_list")
+        assert "note" in add_def["input_schema"]["properties"]
+        assert add_def["input_schema"]["required"] == ["note"]
+        assert "quantity" in add_def["input_schema"]["properties"]
+
+        # Verify import_recipe_from_url has required url param
+        import_def = next(d for d in defs if d["name"] == "import_recipe_from_url")
+        assert import_def["input_schema"]["required"] == ["url"]

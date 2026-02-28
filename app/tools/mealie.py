@@ -1,13 +1,20 @@
 """
-Mealie read-only tools — search recipes, meal plans, shopping lists.
+Mealie tools — search recipes, meal plans, shopping lists, and write operations.
 
-Registers four tools with the ToolRegistry for Claude tool-use:
+Registers eight tools with the ToolRegistry for Claude tool-use:
+  Read tools:
   - search_recipes: search by name, ingredient, or tag
   - get_meal_plan: current week's planned meals
   - get_shopping_list: active shopping list items
   - get_recipe_detail: full recipe with ingredients and steps
+  Write tools:
+  - create_meal_plan_entry: add a meal plan entry for a date
+  - add_to_shopping_list: add an item to the active shopping list
+  - remove_from_shopping_list: check off / remove a shopping list item
+  - import_recipe_from_url: import a recipe via Mealie's scraper
 
 CHANGELOG:
+- 2026-02-28: Add four write tools (STORY-039)
 - 2026-02-28: Initial creation — four read tools (STORY-037)
 """
 
@@ -161,8 +168,101 @@ async def _get_recipe_detail(settings: Settings, *, slug: str) -> dict:
         return {"error": "Recipe not found"}
 
 
+async def _create_meal_plan_entry(
+    settings: Settings, *, date: str, entry_type: str, recipe_slug: str
+) -> dict:
+    """Create a meal plan entry for a specific date and meal type."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.post(
+                f"{settings.mealie_base_url}/api/households/mealplans",
+                headers=_headers(settings),
+                json={
+                    "date": date,
+                    "entryType": entry_type,
+                    "recipeId": recipe_slug,
+                },
+            )
+            resp.raise_for_status()
+            return {
+                "success": True,
+                "date": date,
+                "entry_type": entry_type,
+                "recipe_slug": recipe_slug,
+            }
+    except Exception:
+        logger.warning("Create meal plan entry failed", exc_info=True)
+        return {"error": "Failed to create meal plan entry"}
+
+
+async def _add_to_shopping_list(settings: Settings, *, note: str, quantity: float = 1) -> dict:
+    """Add an item to the active Mealie shopping list."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            # Step 1: get first shopping list ID
+            resp = await client.get(
+                f"{settings.mealie_base_url}/api/households/shopping/lists",
+                headers=_headers(settings),
+            )
+            resp.raise_for_status()
+            lists_data = resp.json()
+            if isinstance(lists_data, dict):
+                items_list = lists_data.get("items", lists_data)
+            else:
+                items_list = lists_data
+            if not items_list:
+                return {"error": "Failed to add item to shopping list"}
+
+            first = items_list[0] if isinstance(items_list, list) else items_list
+            list_id = first.get("id", "")
+
+            # Step 2: add item to that list
+            resp = await client.post(
+                f"{settings.mealie_base_url}/api/households/shopping/lists/{list_id}/items",
+                headers=_headers(settings),
+                json={"note": note, "quantity": quantity},
+            )
+            resp.raise_for_status()
+            return {"success": True, "item": note, "list_id": list_id}
+    except Exception:
+        logger.warning("Add to shopping list failed", exc_info=True)
+        return {"error": "Failed to add item to shopping list"}
+
+
+async def _remove_from_shopping_list(settings: Settings, *, item_id: str) -> dict:
+    """Check off / remove an item from the Mealie shopping list."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.delete(
+                f"{settings.mealie_base_url}/api/households/shopping/lists/items/{item_id}",
+                headers=_headers(settings),
+            )
+            resp.raise_for_status()
+            return {"success": True, "removed_item_id": item_id}
+    except Exception:
+        logger.warning("Remove from shopping list failed", exc_info=True)
+        return {"error": "Failed to remove item"}
+
+
+async def _import_recipe_from_url(settings: Settings, *, url: str) -> dict:
+    """Import a recipe from a URL using Mealie's scraper."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.post(
+                f"{settings.mealie_base_url}/api/recipes/create-url",
+                headers=_headers(settings),
+                json={"url": url, "includeTags": False},
+            )
+            resp.raise_for_status()
+            slug = resp.json()
+            return {"success": True, "slug": slug}
+    except Exception:
+        logger.warning("Import recipe from URL failed", exc_info=True)
+        return {"error": "Failed to import recipe"}
+
+
 def register_mealie_tools(registry: ToolRegistry, settings: Settings) -> None:
-    """Register all Mealie read tools with the given registry."""
+    """Register all Mealie tools (read + write) with the given registry."""
     registry.register(
         name="search_recipes",
         description="Search Mealie recipes by name, ingredient, or tag",
@@ -213,4 +313,88 @@ def register_mealie_tools(registry: ToolRegistry, settings: Settings) -> None:
             "required": ["slug"],
         },
         handler=lambda **kwargs: _get_recipe_detail(settings, **kwargs),
+    )
+
+    registry.register(
+        name="create_meal_plan_entry",
+        description=(
+            "Create a meal plan entry for a specific date and meal type. "
+            "Describe the action before executing."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string",
+                    "description": "Date in YYYY-MM-DD format",
+                },
+                "entry_type": {
+                    "type": "string",
+                    "description": "Meal type: breakfast, lunch, dinner, or side",
+                },
+                "recipe_slug": {
+                    "type": "string",
+                    "description": "Recipe slug to assign",
+                },
+            },
+            "required": ["date", "entry_type", "recipe_slug"],
+        },
+        handler=lambda **kwargs: _create_meal_plan_entry(settings, **kwargs),
+    )
+
+    registry.register(
+        name="add_to_shopping_list",
+        description=(
+            "Add an item to the active Mealie shopping list. Describe the action before executing."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "note": {
+                    "type": "string",
+                    "description": "Item description (e.g., 'Milk 1L')",
+                },
+                "quantity": {
+                    "type": "number",
+                    "description": "Quantity (default 1)",
+                },
+            },
+            "required": ["note"],
+        },
+        handler=lambda **kwargs: _add_to_shopping_list(settings, **kwargs),
+    )
+
+    registry.register(
+        name="remove_from_shopping_list",
+        description="Check off / remove an item from the Mealie shopping list",
+        parameters={
+            "type": "object",
+            "properties": {
+                "item_id": {
+                    "type": "string",
+                    "description": "Shopping list item ID to remove",
+                },
+            },
+            "required": ["item_id"],
+        },
+        handler=lambda **kwargs: _remove_from_shopping_list(settings, **kwargs),
+    )
+
+    registry.register(
+        name="import_recipe_from_url",
+        description=(
+            "Import a recipe from a URL using Mealie's scraper. "
+            "Describe the action before executing."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "URL of the recipe to import",
+                },
+            },
+            "required": ["url"],
+        },
+        handler=lambda **kwargs: _import_recipe_from_url(settings, **kwargs),
     )

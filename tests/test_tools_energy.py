@@ -1,6 +1,7 @@
 """Tests for energy & solar tool handlers.
 
 CHANGELOG:
+- 2026-02-28: Add capacity tariff peak tracking tests (STORY-044)
 - 2026-02-28: Initial creation — energy tool tests (STORY-036)
 """
 
@@ -10,6 +11,7 @@ import pytest
 
 from app.config import Settings
 from app.tools.energy import (
+    _get_capacity_peaks,
     _get_energy_realtime,
     _get_solar_status,
     _get_tariff_comparison,
@@ -161,11 +163,53 @@ async def test_get_tariff_comparison_success():
     assert "error" not in result
 
 
+# ---------- get_capacity_peaks ----------
+
+
+@pytest.mark.asyncio
+async def test_get_capacity_peaks_success():
+    """Mock API returning peak data, verify it passes through."""
+    peak_data = {
+        "peaks": [
+            {"timestamp": "2026-02-15T18:30:00Z", "kw": 5.2},
+            {"timestamp": "2026-02-20T07:15:00Z", "kw": 4.8},
+        ],
+        "projected_annual_cost_eur": 312.50,
+        "current_month_max_kw": 5.2,
+    }
+    mock_client = AsyncMock()
+    mock_client.get.return_value = _mock_response(peak_data)
+
+    with patch("app.tools.energy.httpx.AsyncClient") as mock_cls:
+        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        result = await _get_capacity_peaks(_settings())
+
+    assert result["peaks"] == peak_data["peaks"]
+    assert result["projected_annual_cost_eur"] == 312.50
+    assert result["current_month_max_kw"] == 5.2
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
+async def test_get_capacity_peaks_failure():
+    """Mock API failure, verify error dict."""
+    mock_client = AsyncMock()
+    mock_client.get.side_effect = Exception("Connection refused")
+
+    with patch("app.tools.energy.httpx.AsyncClient") as mock_cls:
+        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        result = await _get_capacity_peaks(_settings())
+
+    assert result == {"error": "Capacity peak data unavailable"}
+
+
 # ---------- register_energy_tools ----------
 
 
 def test_register_energy_tools():
-    """Verify all 3 tools appear in registry definitions."""
+    """Verify all 4 tools appear in registry definitions."""
     registry = ToolRegistry()
     register_energy_tools(registry, _settings())
 
@@ -174,4 +218,5 @@ def test_register_energy_tools():
     assert "get_energy_realtime" in tool_names
     assert "get_solar_status" in tool_names
     assert "get_tariff_comparison" in tool_names
-    assert len(defs) == 3
+    assert "get_capacity_peaks" in tool_names
+    assert len(defs) == 4

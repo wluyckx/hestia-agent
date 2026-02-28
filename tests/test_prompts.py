@@ -1,6 +1,7 @@
 """Tests for the system prompt module.
 
 CHANGELOG:
+- 2026-02-28: Add deep-link pattern verification tests (STORY-042)
 - 2026-02-28: Initial creation — enriched system prompt (STORY-034)
 """
 
@@ -132,3 +133,26 @@ class TestSystemPromptConfigurability:
         result = build_system_prompt(BackendData(), tool_descriptions=[])
         assert isinstance(result, str)
         assert len(result) > 100  # Non-trivial prompt
+
+
+class TestDeepLinkPatterns:
+    """Verify system prompt contains correct deep-link URL patterns (STORY-042)."""
+
+    def _prompt(self) -> str:
+        return build_system_prompt(BackendData(), tool_descriptions=[])
+
+    def test_deep_links_recipe_pattern(self):
+        """Prompt instructs Claude to link recipes using /meals/{slug}."""
+        prompt = self._prompt()
+        assert "/meals/" in prompt
+        assert "{slug}" in prompt
+
+    def test_deep_links_shopping_pattern(self):
+        """Prompt instructs Claude to link spending details to /shopping."""
+        prompt = self._prompt()
+        assert "/shopping" in prompt
+
+    def test_deep_links_savings_pattern(self):
+        """Prompt instructs Claude to link savings breakdown to /savings."""
+        prompt = self._prompt()
+        assert "/savings" in prompt
