@@ -8,6 +8,7 @@ static greeting if Claude call fails.
 PWA contract: src/lib/api/agent.ts — GreetingResponse
 
 CHANGELOG:
+- 2026-02-28: Proactive spending alerts, energy insights, meal suggestions (STORY-047/048/049)
 - 2026-02-28: Claude-generated intelligent greeting (STORY-043)
 """
 
@@ -15,14 +16,16 @@ import logging
 from datetime import UTC, datetime
 from typing import Annotated
 
+import aiosqlite
 import anthropic
 from fastapi import APIRouter, Depends
 
 from app.backends import fetch_all
 from app.config import Settings
-from app.dependencies import get_current_user, get_settings
+from app.dependencies import get_current_user, get_db, get_settings
 from app.models import DinnerInfo, EnergyInfo, GreetingResponse, ShoppingInfo
 from app.prompts import _GREETING_PROMPT, build_greeting_prompt
+from app.tools.memory import get_user_preferences
 
 router = APIRouter(tags=["greeting"])
 logger = logging.getLogger(__name__)
@@ -42,6 +45,7 @@ async def _generate_claude_greeting(
     settings: Settings,
     time_greeting: str,
     data: "BackendData",  # noqa: F821
+    preferences: list[dict] | None = None,
 ) -> str | None:
     """Ask Claude to generate a contextual greeting. Returns None on failure."""
     if not settings.anthropic_api_key:
@@ -49,7 +53,7 @@ async def _generate_claude_greeting(
 
     try:
         client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-        user_message = build_greeting_prompt(time_greeting, data)
+        user_message = build_greeting_prompt(time_greeting, data, preferences=preferences)
 
         response = await client.messages.create(
             model=settings.claude_model,
@@ -72,17 +76,24 @@ async def _generate_claude_greeting(
 async def greeting(
     _user: Annotated[str, Depends(get_current_user)],
     settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[aiosqlite.Connection, Depends(get_db)],
 ) -> GreetingResponse:
     """Return a contextual greeting with live energy/dinner/shopping data.
 
-    Fetches from backends concurrently. Generates greeting via Claude.
+    Fetches from backends concurrently. Generates greeting via Claude
+    with proactive alerts for spending, energy, and meal suggestions.
     Falls back to static greeting if Claude call fails.
     """
     data = await fetch_all(settings)
     static_greeting = _time_greeting()
 
+    # Fetch user preferences for proactive alerts
+    preferences = await get_user_preferences(db, _user)
+
     # Try Claude-generated greeting, fall back to static
-    greeting_text = await _generate_claude_greeting(settings, static_greeting, data)
+    greeting_text = await _generate_claude_greeting(
+        settings, static_greeting, data, preferences=preferences
+    )
     if not greeting_text:
         greeting_text = static_greeting
 

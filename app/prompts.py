@@ -5,6 +5,7 @@ Centralizes all prompt construction — chat.py imports build_system_prompt()
 instead of hardcoding prompt strings.
 
 CHANGELOG:
+- 2026-02-28: Proactive greeting insights (STORY-047/048/049)
 - 2026-02-28: Add preferences injection (STORY-045)
 - 2026-02-28: Add greeting prompt (STORY-043)
 - 2026-02-28: Initial creation — enriched system prompt (STORY-034)
@@ -155,19 +156,43 @@ the household data below. Mention the most relevant data points \
 naturally — don't list everything.
 
 If dinner is planned, mention it. If no dinner is planned, \
-suggest planning one. If energy or spending data is notable, \
-mention it briefly. Be warm and practical.
+suggest a recipe based on frequently bought items or preferences.
+
+If the household has a grocery budget preference and spending is \
+above pace (i.e., more than expected for this point in the month), \
+include a brief spending alert with the amount. Don't alert if \
+no budget preference exists or spending is within budget.
+
+If solar production is high or battery is above 80%, suggest \
+running energy-intensive appliances. If approaching a capacity \
+tariff peak, warn briefly.
 
 Respond in English by default. Do NOT use markdown — plain text only.
 """
 
 
-def build_greeting_prompt(time_greeting: str, data: BackendData) -> str:
+def _build_preferences_block(preferences: list[dict]) -> str:
+    """Build a preferences context block for the greeting prompt."""
+    if not preferences:
+        return ""
+
+    lines = ["\n**Household preferences**:"]
+    for pref in preferences:
+        lines.append(f"- {pref['key']}: {pref['value']}")
+    return "\n".join(lines) + "\n"
+
+
+def build_greeting_prompt(
+    time_greeting: str,
+    data: BackendData,
+    preferences: list[dict] | None = None,
+) -> str:
     """Build the prompt for Claude to generate a contextual greeting.
 
     Args:
         time_greeting: Static time-of-day greeting (e.g., "Good evening").
         data: Live backend data snapshot.
+        preferences: List of {"key": ..., "value": ...} household prefs.
 
     Returns:
         User message to send to Claude for greeting generation.
@@ -176,4 +201,8 @@ def build_greeting_prompt(time_greeting: str, data: BackendData) -> str:
     if not context:
         context = "\nNo live household data available right now.\n"
 
-    return f"Time greeting: {time_greeting}\n{context}\nGenerate a personalized greeting."
+    pref_block = _build_preferences_block(preferences or [])
+
+    return (
+        f"Time greeting: {time_greeting}\n{context}{pref_block}\nGenerate a personalized greeting."
+    )

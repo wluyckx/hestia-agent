@@ -1,6 +1,7 @@
 """Tests for the greeting endpoint.
 
 CHANGELOG:
+- 2026-02-28: Add proactive insight tests (STORY-047/048/049)
 - 2026-02-28: Add Claude greeting tests + fallback (STORY-043)
 """
 
@@ -186,3 +187,88 @@ async def test_greeting_structured_data_with_claude(initialized_client):
 async def test_greeting_requires_auth(initialized_client):
     resp = await initialized_client.get("/greeting")
     assert resp.status_code == 401
+
+
+# ---- Proactive insight tests (STORY-047/048/049) ----
+
+
+@pytest.mark.asyncio
+async def test_greeting_prompt_includes_budget_preference():
+    """Spending alert: greeting prompt includes budget when preference set."""
+    from app.backends import BackendData
+    from app.prompts import build_greeting_prompt
+
+    data = BackendData(spending={"total_cents": 65000, "currency": "EUR"})
+    preferences = [{"key": "budget_groceries", "value": "EUR 600/month"}]
+
+    prompt = build_greeting_prompt("Good evening", data, preferences=preferences)
+    assert "budget_groceries" in prompt
+    assert "EUR 600/month" in prompt
+    assert "650.00" in prompt  # spending amount
+
+
+@pytest.mark.asyncio
+async def test_greeting_prompt_no_alert_without_budget():
+    """No spending alert when no budget preference exists."""
+    from app.backends import BackendData
+    from app.prompts import build_greeting_prompt
+
+    data = BackendData(spending={"total_cents": 65000, "currency": "EUR"})
+    prompt = build_greeting_prompt("Good evening", data, preferences=[])
+    assert "budget" not in prompt.lower() or "preferences" not in prompt.lower()
+
+
+@pytest.mark.asyncio
+async def test_greeting_prompt_includes_energy_data():
+    """Energy insights: solar and battery data in greeting prompt."""
+    from app.backends import BackendData
+    from app.prompts import build_greeting_prompt
+
+    data = BackendData(solar={"pv_power_w": 3200, "battery_soc_pct": 90, "pv_daily_kwh": 15.0})
+    prompt = build_greeting_prompt("Good afternoon", data)
+    assert "3200" in prompt  # solar power
+    assert "90" in prompt  # battery SOC
+    assert "15.0" in prompt  # daily kWh
+
+
+@pytest.mark.asyncio
+async def test_greeting_prompt_no_dinner_context():
+    """Meal suggestion: when no dinner planned, prompt has no meal data."""
+    from app.backends import BackendData
+    from app.prompts import build_greeting_prompt
+
+    data = BackendData()  # no meals
+    preferences = [{"key": "diet", "value": "vegetarian"}]
+    prompt = build_greeting_prompt("Good evening", data, preferences=preferences)
+    # Prompt should not mention any meal plan
+    assert "meal plan" not in prompt.lower()
+    # But should include diet preference for Claude to use
+    assert "vegetarian" in prompt
+
+
+@pytest.mark.asyncio
+async def test_greeting_system_prompt_spending_alert_instruction():
+    """System prompt instructs Claude about spending alerts."""
+    from app.prompts import _GREETING_PROMPT
+
+    assert "budget" in _GREETING_PROMPT.lower()
+    assert "spending" in _GREETING_PROMPT.lower()
+
+
+@pytest.mark.asyncio
+async def test_greeting_system_prompt_energy_instructions():
+    """System prompt instructs Claude about energy insights."""
+    from app.prompts import _GREETING_PROMPT
+
+    assert "solar" in _GREETING_PROMPT.lower()
+    assert "battery" in _GREETING_PROMPT.lower()
+    assert "capacity" in _GREETING_PROMPT.lower()
+
+
+@pytest.mark.asyncio
+async def test_greeting_system_prompt_meal_suggestion():
+    """System prompt instructs Claude about meal suggestions."""
+    from app.prompts import _GREETING_PROMPT
+
+    assert "dinner" in _GREETING_PROMPT.lower()
+    assert "suggest" in _GREETING_PROMPT.lower()
