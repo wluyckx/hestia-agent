@@ -8,6 +8,7 @@ conversation — tool execution is invisible to the frontend.
 PWA contract: src/lib/api/agent.ts — streamChat / ChatSSEChunk
 
 CHANGELOG:
+- 2026-02-28: Register memory tools + inject preferences (STORY-045)
 - 2026-02-28: Register shopping analytics tools in tool-use loop (STORY-038)
 - 2026-02-28: Register Mealie tools in tool-use loop (STORY-037)
 - 2026-02-28: Register energy tools in tool-use loop (STORY-036)
@@ -34,6 +35,7 @@ from app.prompts import build_system_prompt
 from app.tools.cross_domain import register_cross_domain_tools
 from app.tools.energy import register_energy_tools
 from app.tools.mealie import register_mealie_tools
+from app.tools.memory import get_user_preferences, register_memory_tools
 from app.tools.registry import ToolError, create_default_registry
 from app.tools.shopping import register_shopping_tools
 
@@ -120,9 +122,14 @@ async def chat(
     register_mealie_tools(registry, settings)
     register_shopping_tools(registry, settings)
     register_cross_domain_tools(registry, settings)
+    register_memory_tools(registry, db, user)
+
+    # Fetch stored preferences for system prompt injection
+    preferences = await get_user_preferences(db, user)
+
     tool_defs = registry.get_definitions()
     tool_descriptions = registry.get_tool_descriptions()
-    system_prompt = build_system_prompt(backend_data, tool_descriptions)
+    system_prompt = build_system_prompt(backend_data, tool_descriptions, preferences=preferences)
 
     # Build messages for Claude
     messages = [{"role": _map_role(h.role), "content": h.content} for h in body.history[-50:]]

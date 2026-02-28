@@ -5,6 +5,7 @@ Centralizes all prompt construction — chat.py imports build_system_prompt()
 instead of hardcoding prompt strings.
 
 CHANGELOG:
+- 2026-02-28: Add preferences injection (STORY-045)
 - 2026-02-28: Add greeting prompt (STORY-043)
 - 2026-02-28: Initial creation — enriched system prompt (STORY-034)
 """
@@ -100,9 +101,28 @@ def _build_context_block(data: BackendData) -> str:
     return "\n**Current household snapshot** (live data):\n" + "\n".join(sections) + "\n"
 
 
+def _build_preferences_section(preferences: list[dict]) -> str:
+    """Build the household preferences section of the system prompt."""
+    if not preferences:
+        return ""
+
+    lines = ["\n**Household preferences** (remembered):"]
+    for pref in preferences:
+        key = pref.get("key", "unknown")
+        value = pref.get("value", "")
+        lines.append(f"- {key}: {value}")
+
+    lines.append(
+        "\nUse these preferences to personalize your responses. "
+        "Respect dietary restrictions and budget limits."
+    )
+    return "\n".join(lines) + "\n"
+
+
 def build_system_prompt(
     backend_data: BackendData,
     tool_descriptions: list[dict],
+    preferences: list[dict] | None = None,
 ) -> str:
     """Build the full system prompt from template sections.
 
@@ -110,6 +130,8 @@ def build_system_prompt(
         backend_data: Live data snapshot from backends.
         tool_descriptions: List of {"name": ..., "description": ...} dicts
             for registered tools. Empty list if no tools available yet.
+        preferences: List of {"key": ..., "value": ...} dicts for stored
+            household preferences. None or empty list if none set.
 
     Returns:
         Complete system prompt string.
@@ -119,6 +141,7 @@ def build_system_prompt(
         _SAFETY,
         _DEEP_LINKS,
         _build_tool_section(tool_descriptions),
+        _build_preferences_section(preferences or []),
         _build_context_block(backend_data),
     ]
 

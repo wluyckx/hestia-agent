@@ -2,6 +2,9 @@
 SQLite database initialisation and connection factory.
 
 Creates tables on startup, enables WAL mode and foreign keys.
+
+CHANGELOG:
+- 2026-02-28: Add preferences table (STORY-045)
 """
 
 import aiosqlite
@@ -23,8 +26,19 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at      TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS preferences (
+    id          TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    key         TEXT NOT NULL,
+    value       TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    UNIQUE(user_id, key)
+);
+
 CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_preferences_user ON preferences(user_id);
 """
 
 
