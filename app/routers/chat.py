@@ -8,6 +8,9 @@ conversation — tool execution is invisible to the frontend.
 PWA contract: src/lib/api/agent.ts — streamChat / ChatSSEChunk
 
 CHANGELOG:
+- 2026-02-28: Register shopping analytics tools in tool-use loop (STORY-038)
+- 2026-02-28: Register Mealie tools in tool-use loop (STORY-037)
+- 2026-02-28: Register energy tools in tool-use loop (STORY-036)
 - 2026-02-28: Add tool-use loop with registry (STORY-035)
 - 2026-02-28: Use build_system_prompt from prompts.py (STORY-034)
 """
@@ -28,7 +31,10 @@ from app.config import Settings
 from app.dependencies import get_current_user, get_db, get_settings
 from app.models import ChatRequest
 from app.prompts import build_system_prompt
+from app.tools.energy import register_energy_tools
+from app.tools.mealie import register_mealie_tools
 from app.tools.registry import ToolError, create_default_registry
+from app.tools.shopping import register_shopping_tools
 
 router = APIRouter(tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -109,6 +115,9 @@ async def chat(
 
     # Build tool registry and system prompt
     registry = create_default_registry()
+    register_energy_tools(registry, settings)
+    register_mealie_tools(registry, settings)
+    register_shopping_tools(registry, settings)
     tool_defs = registry.get_definitions()
     tool_descriptions = registry.get_tool_descriptions()
     system_prompt = build_system_prompt(backend_data, tool_descriptions)

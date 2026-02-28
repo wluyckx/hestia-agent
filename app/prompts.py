@@ -5,6 +5,7 @@ Centralizes all prompt construction — chat.py imports build_system_prompt()
 instead of hardcoding prompt strings.
 
 CHANGELOG:
+- 2026-02-28: Add greeting prompt (STORY-043)
 - 2026-02-28: Initial creation — enriched system prompt (STORY-034)
 """
 
@@ -122,3 +123,34 @@ def build_system_prompt(
     ]
 
     return "\n".join(part for part in parts if part)
+
+
+_GREETING_PROMPT = """\
+You are Hestia, a Belgian household assistant. Generate a short, \
+friendly greeting (2-3 sentences max) based on the time of day and \
+the household data below. Mention the most relevant data points \
+naturally — don't list everything.
+
+If dinner is planned, mention it. If no dinner is planned, \
+suggest planning one. If energy or spending data is notable, \
+mention it briefly. Be warm and practical.
+
+Respond in English by default. Do NOT use markdown — plain text only.
+"""
+
+
+def build_greeting_prompt(time_greeting: str, data: BackendData) -> str:
+    """Build the prompt for Claude to generate a contextual greeting.
+
+    Args:
+        time_greeting: Static time-of-day greeting (e.g., "Good evening").
+        data: Live backend data snapshot.
+
+    Returns:
+        User message to send to Claude for greeting generation.
+    """
+    context = _build_context_block(data)
+    if not context:
+        context = "\nNo live household data available right now.\n"
+
+    return f"Time greeting: {time_greeting}\n{context}\nGenerate a personalized greeting."
