@@ -3,6 +3,9 @@ Chat SSE streaming endpoint.
 
 Streams Claude responses as Server-Sent Events.
 PWA contract: src/lib/api/agent.ts — streamChat / ChatSSEChunk
+
+CHANGELOG:
+- 2026-02-28: Use build_system_prompt from prompts.py (STORY-034)
 """
 
 import json
@@ -15,18 +18,13 @@ import anthropic
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
-from app.backends import build_context_block, fetch_all
+from app.backends import fetch_all
 from app.config import Settings
 from app.dependencies import get_current_user, get_db, get_settings
 from app.models import ChatRequest
+from app.prompts import build_system_prompt
 
 router = APIRouter(tags=["chat"])
-
-SYSTEM_PROMPT_BASE = (
-    "You are Hestia, a helpful personal assistant for a Belgian family. "
-    "You help with meal planning, shopping, energy monitoring, and daily life. "
-    "Be concise, friendly, and practical. Respond in the same language the user writes in."
-)
 
 
 async def _ensure_conversation(
@@ -92,8 +90,7 @@ async def chat(
 
     # Fetch live backend data for system prompt
     backend_data = await fetch_all(settings)
-    context_block = build_context_block(backend_data)
-    system_prompt = SYSTEM_PROMPT_BASE + context_block
+    system_prompt = build_system_prompt(backend_data, tool_descriptions=[])
 
     # Build messages for Claude — map PWA "agent" role to Anthropic "assistant"
     def _map_role(role: str) -> str:
