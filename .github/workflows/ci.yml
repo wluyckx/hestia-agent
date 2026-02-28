@@ -28,7 +28,7 @@ jobs:
       - run: pip install ".[dev]"
       - run: pytest -v
         env:
-          JWT_SECRET_KEY: test-ci-secret-key
+          JWT_SECRET: test-ci-secret-key
           POC_USERNAME: testuser
           POC_PASSWORD_HASH: unused
           ANTHROPIC_API_KEY: sk-ant-test

@@ -57,13 +57,13 @@ async def login(
 
     access_token = _create_token(
         {"sub": body.username, "type": "access"},
-        settings.jwt_secret_key,
+        settings.jwt_secret,
         settings.jwt_algorithm,
         access_expires,
     )
     refresh_token = _create_token(
         {"sub": body.username, "type": "refresh"},
-        settings.jwt_secret_key,
+        settings.jwt_secret,
         settings.jwt_algorithm,
         refresh_expires,
     )
@@ -106,7 +106,7 @@ async def refresh(
     try:
         payload = jwt.decode(
             body.refresh_token,
-            settings.jwt_secret_key,
+            settings.jwt_secret,
             algorithms=[settings.jwt_algorithm],
         )
         username: str | None = payload.get("sub")
@@ -125,7 +125,7 @@ async def refresh(
     access_expires = timedelta(minutes=settings.access_token_expire_minutes)
     access_token = _create_token(
         {"sub": username, "type": "access"},
-        settings.jwt_secret_key,
+        settings.jwt_secret,
         settings.jwt_algorithm,
         access_expires,
     )

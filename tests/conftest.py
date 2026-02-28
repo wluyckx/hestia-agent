@@ -18,7 +18,7 @@ _TEST_HASH = _pwd_context.hash(_TEST_PASSWORD)
 
 os.environ.update(
     {
-        "JWT_SECRET_KEY": _TEST_SECRET,
+        "JWT_SECRET": _TEST_SECRET,
         "POC_USERNAME": "testuser",
         "POC_PASSWORD_HASH": _TEST_HASH,
         "ANTHROPIC_API_KEY": "sk-ant-test-key",

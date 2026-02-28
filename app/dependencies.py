@@ -56,7 +56,7 @@ async def get_current_user(
         )
 
     try:
-        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+        payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
         username: str | None = payload.get("sub")
         token_type: str | None = payload.get("type")
         if username is None or token_type != "access":
