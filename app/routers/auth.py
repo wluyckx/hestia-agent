@@ -3,6 +3,9 @@ Authentication endpoints: login, validate, refresh.
 
 Issues JWTs as httpOnly cookies and in JSON body.
 PWA contract: src/lib/auth/auth.ts
+
+CHANGELOG:
+- 2026-03-01: Set cookie domain for subdomain iframes (configurable via COOKIE_DOMAIN)
 """
 
 from datetime import UTC, datetime, timedelta
@@ -75,6 +78,7 @@ async def login(
         secure=True,
         samesite="lax",
         path="/",
+        domain=settings.cookie_domain or None,
         max_age=int(access_expires.total_seconds()),
     )
 
@@ -137,6 +141,7 @@ async def refresh(
         secure=True,
         samesite="lax",
         path="/",
+        domain=settings.cookie_domain or None,
         max_age=int(access_expires.total_seconds()),
     )
 

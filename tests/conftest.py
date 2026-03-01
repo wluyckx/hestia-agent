@@ -24,6 +24,7 @@ os.environ.update(
         "ANTHROPIC_API_KEY": "sk-ant-test-key",
         "WHISPER_BASE_URL": "http://whisper-test:9000",
         "DATABASE_PATH": "",  # overridden per test
+        "COOKIE_DOMAIN": "",  # no domain restriction in tests
     }
 )
 
