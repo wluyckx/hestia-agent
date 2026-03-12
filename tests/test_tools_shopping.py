@@ -1,6 +1,7 @@
 """Tests for shopping analytics tool handlers.
 
 CHANGELOG:
+- 2026-03-12: Rewrite tests for actual ShoppingReceipts API endpoints
 - 2026-02-28: Initial creation — shopping tool tests (STORY-038)
 """
 
@@ -11,10 +12,11 @@ import pytest
 from app.config import Settings
 from app.tools.registry import ToolRegistry
 from app.tools.shopping import (
-    _get_product_price_history,
+    _get_recent_products,
     _get_smart_shopping_list,
     _get_spending_summary,
     _get_top_products,
+    _search_products,
     register_shopping_tools,
 )
 
@@ -46,13 +48,15 @@ def _mock_response(json_data, status_code=200):
 
 @pytest.mark.asyncio
 async def test_get_spending_summary_success():
-    """Mock spending response, verify correct structure."""
+    """Mock spending response — matches /v1/analytics/spending/monthly."""
     mock_client = AsyncMock()
     mock_client.get.return_value = _mock_response(
         {
             "total_cents": 45230,
+            "xtra_savings_cents": 1200,
+            "net_total_cents": 44030,
             "currency": "EUR",
-            "month": "2026-02",
+            "period": "monthly",
         }
     )
 
@@ -62,43 +66,41 @@ async def test_get_spending_summary_success():
         result = await _get_spending_summary(_settings())
 
     assert result["total_cents"] == 45230
+    assert result["xtra_savings_cents"] == 1200
+    assert result["net_total_cents"] == 44030
     assert result["currency"] == "EUR"
-    assert result["store"] is None
-    assert result["month"] == "2026-02"
     assert "error" not in result
 
 
 @pytest.mark.asyncio
-async def test_get_spending_summary_with_store():
-    """Verify store param is passed to API call."""
+async def test_get_spending_summary_weekly():
+    """Verify weekly period hits the weekly endpoint."""
     mock_client = AsyncMock()
     mock_client.get.return_value = _mock_response(
         {
             "total_cents": 12000,
+            "xtra_savings_cents": 0,
+            "net_total_cents": 12000,
             "currency": "EUR",
-            "month": "2026-02",
+            "period": "weekly",
         }
     )
 
     with patch("app.tools.shopping.httpx.AsyncClient") as mock_cls:
         mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
         mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-        result = await _get_spending_summary(_settings(), store="Colruyt")
+        result = await _get_spending_summary(_settings(), period="weekly")
 
-    assert result["total_cents"] == 12000
-    assert result["store"] == "Colruyt"
-
-    # Verify the API was called with the store parameter
-    call_kwargs = mock_client.get.call_args
-    assert call_kwargs.kwargs["params"]["store"] == "Colruyt"
-    assert call_kwargs.kwargs["params"]["months"] == 1
+    assert result["period"] == "weekly"
+    call_url = mock_client.get.call_args.args[0]
+    assert "spending/weekly" in call_url
 
 
 @pytest.mark.asyncio
 async def test_get_spending_summary_no_api_key():
     """When shopping_api_key is empty, return error without calling API."""
     result = await _get_spending_summary(_settings(shopping_api_key=""))
-    assert result == {"error": "Spending data unavailable"}
+    assert "error" in result
 
 
 # ---------- get_top_products ----------
@@ -106,15 +108,21 @@ async def test_get_spending_summary_no_api_key():
 
 @pytest.mark.asyncio
 async def test_get_top_products_success():
-    """Mock products response, verify correct structure."""
+    """Mock response matching /v1/analytics/top-products."""
     mock_client = AsyncMock()
     mock_client.get.return_value = _mock_response(
-        {
-            "products": [
-                {"name": "Milk", "count": 15, "last_price_cents": 159},
-                {"name": "Bread", "count": 12, "last_price_cents": 249},
-            ]
-        }
+        [
+            {
+                "article_nr": "123",
+                "product_name": "Halfvolle Melk",
+                "google_category": "dairy",
+                "total_spent_cents": 4500,
+                "purchase_count": 15,
+                "avg_unit_price_cents": 159,
+                "first_purchase": "2025-06-01T10:00:00",
+                "last_purchase": "2026-03-10T14:00:00",
+            },
+        ]
     )
 
     with patch("app.tools.shopping.httpx.AsyncClient") as mock_cls:
@@ -122,42 +130,84 @@ async def test_get_top_products_success():
         mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
         result = await _get_top_products(_settings(), limit=5)
 
-    assert len(result["products"]) == 2
-    assert result["products"][0]["name"] == "Milk"
-    assert result["products"][0]["count"] == 15
-    assert result["products"][0]["last_price_cents"] == 159
-    assert result["products"][1]["name"] == "Bread"
-    assert "error" not in result
+    assert len(result["products"]) == 1
+    assert result["products"][0]["name"] == "Halfvolle Melk"
+    assert result["products"][0]["purchase_count"] == 15
+    assert result["products"][0]["last_purchase"] == "2026-03-10T14:00:00"
+    # Verify correct endpoint
+    call_url = mock_client.get.call_args.args[0]
+    assert "/v1/analytics/top-products" in call_url
 
 
-# ---------- get_product_price_history ----------
+# ---------- search_products ----------
 
 
 @pytest.mark.asyncio
-async def test_get_product_price_history_success():
-    """Mock price history response, verify correct structure."""
+async def test_search_products_success():
+    """Mock response matching /v1/generic-products/search."""
     mock_client = AsyncMock()
     mock_client.get.return_value = _mock_response(
-        {
-            "history": [
-                {"date": "2026-02-01", "price_cents": 159, "store": "Colruyt"},
-                {"date": "2026-01-15", "price_cents": 149, "store": "Delhaize"},
-            ]
-        }
+        [
+            {
+                "generic_product_id": 42,
+                "generic_product_name": "Champignons",
+                "name_nl": "Champignons",
+                "google_category": "produce",
+                "retail_product_count": 5,
+                "first_purchase": "2025-09-01T00:00:00",
+                "last_purchase": "2026-03-05T00:00:00",
+            },
+        ]
     )
 
     with patch("app.tools.shopping.httpx.AsyncClient") as mock_cls:
         mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
         mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-        result = await _get_product_price_history(_settings(), product_name="Milk")
+        result = await _search_products(_settings(), query="champignons")
 
-    assert result["product"] == "Milk"
-    assert len(result["history"]) == 2
-    assert result["history"][0]["date"] == "2026-02-01"
-    assert result["history"][0]["price_cents"] == 159
-    assert result["history"][0]["store"] == "Colruyt"
-    assert result["history"][1]["store"] == "Delhaize"
-    assert "error" not in result
+    assert len(result["products"]) == 1
+    assert result["products"][0]["name"] == "Champignons"
+    assert result["products"][0]["last_purchase"] == "2026-03-05T00:00:00"
+    call_kwargs = mock_client.get.call_args
+    assert call_kwargs.kwargs["params"]["q"] == "champignons"
+
+
+@pytest.mark.asyncio
+async def test_search_products_no_key():
+    """No API key → error dict without calling API."""
+    result = await _search_products(_settings(shopping_api_key=""), query="milk")
+    assert "error" in result
+
+
+# ---------- get_recent_products ----------
+
+
+@pytest.mark.asyncio
+async def test_get_recent_products_success():
+    """Mock response matching /v1/generic-products/recent."""
+    mock_client = AsyncMock()
+    mock_client.get.return_value = _mock_response(
+        [
+            {
+                "generic_product_id": 10,
+                "generic_product_name": "Banaan",
+                "name_nl": "Banaan",
+                "google_category": "produce",
+                "purchase_count": 3,
+                "unique_days": 2,
+                "last_purchased_at": "2026-03-11T15:00:00",
+            },
+        ]
+    )
+
+    with patch("app.tools.shopping.httpx.AsyncClient") as mock_cls:
+        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        result = await _get_recent_products(_settings(), days=5)
+
+    assert len(result["products"]) == 1
+    assert result["products"][0]["name"] == "Banaan"
+    assert result["products"][0]["last_purchased"] == "2026-03-11T15:00:00"
 
 
 # ---------- get_smart_shopping_list ----------
@@ -165,24 +215,42 @@ async def test_get_product_price_history_success():
 
 @pytest.mark.asyncio
 async def test_get_smart_shopping_list_success():
-    """Mock smart list response, verify correct structure."""
+    """Mock response matching /v1/generic-smart-list/."""
     mock_client = AsyncMock()
     mock_client.get.return_value = _mock_response(
         {
-            "items": [
+            "generated_at": "2026-03-12T18:00:00",
+            "language": "nl",
+            "time_period_days": 90,
+            "total_items": 3,
+            "total_estimated_cost_cents": 5000,
+            "urgent_items": [
                 {
-                    "name": "Milk",
-                    "urgency": "high",
-                    "last_purchased": "2026-02-20",
-                    "avg_interval_days": 7,
+                    "generic_product_name": "Melk",
+                    "name_nl": "Melk",
+                    "urgency_level": "urgent",
+                    "purchase_reason": "6 days overdue",
+                    "last_purchase_date": "2026-03-06",
+                    "avg_purchase_interval_days": 7,
+                    "days_since_last_purchase": 6,
+                    "estimated_cost_cents": 159,
                 },
+            ],
+            "high_priority": [
                 {
-                    "name": "Eggs",
-                    "urgency": "medium",
-                    "last_purchased": "2026-02-15",
-                    "avg_interval_days": 14,
+                    "generic_product_name": "Eieren",
+                    "name_nl": "Eieren",
+                    "urgency_level": "high",
+                    "purchase_reason": "Running low",
+                    "last_purchase_date": "2026-03-01",
+                    "avg_purchase_interval_days": 14,
+                    "days_since_last_purchase": 11,
+                    "estimated_cost_cents": 349,
                 },
-            ]
+            ],
+            "medium_priority": [],
+            "bulk_items": [],
+            "seasonal_items": [],
         }
     )
 
@@ -191,20 +259,21 @@ async def test_get_smart_shopping_list_success():
         mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
         result = await _get_smart_shopping_list(_settings())
 
-    assert len(result["items"]) == 2
-    assert result["items"][0]["name"] == "Milk"
-    assert result["items"][0]["urgency"] == "high"
-    assert result["items"][0]["last_purchased"] == "2026-02-20"
-    assert result["items"][0]["avg_interval_days"] == 7
-    assert result["items"][1]["name"] == "Eggs"
-    assert "error" not in result
+    assert result["total_items"] == 3
+    assert len(result["urgent"]) == 1
+    assert result["urgent"][0]["name"] == "Melk"
+    assert result["urgent"][0]["urgency"] == "urgent"
+    assert len(result["high_priority"]) == 1
+    assert result["high_priority"][0]["name"] == "Eieren"
+    call_url = mock_client.get.call_args.args[0]
+    assert "/v1/generic-smart-list/" in call_url
 
 
 # ---------- register_shopping_tools ----------
 
 
 def test_register_shopping_tools():
-    """Verify all 4 tools appear in registry definitions."""
+    """Verify all 5 tools appear in registry definitions."""
     registry = ToolRegistry()
     register_shopping_tools(registry, _settings())
 
@@ -212,6 +281,11 @@ def test_register_shopping_tools():
     tool_names = {d["name"] for d in defs}
     assert "get_spending_summary" in tool_names
     assert "get_top_products" in tool_names
-    assert "get_product_price_history" in tool_names
+    assert "search_products" in tool_names
+    assert "get_recent_products" in tool_names
     assert "get_smart_shopping_list" in tool_names
-    assert len(defs) == 4
+    assert len(defs) == 5
+
+    # Verify search_products has required query param
+    search_def = next(d for d in defs if d["name"] == "search_products")
+    assert "query" in search_def["input_schema"]["required"]
