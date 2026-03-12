@@ -248,14 +248,12 @@ class TestCreateMealPlanEntry:
     """Verify create_meal_plan_entry tool."""
 
     @pytest.mark.asyncio
-    async def test_create_meal_plan_entry_success(self):
+    async def test_create_meal_plan_entry_with_recipe(self):
         """Mock GET (slug→ID) + POST — verify resolved ID in body."""
         mock_client = AsyncMock()
-        # First call: GET recipe by slug to resolve ID
         mock_client.get.return_value = _mock_response(
             {"id": "uuid-spag-001", "name": "Spaghetti Bolognese", "slug": "spaghetti-bolognese"}
         )
-        # Second call: POST meal plan entry
         mock_client.post.return_value = _mock_response({"id": "plan-123"})
 
         with patch("app.tools.mealie.httpx.AsyncClient") as mock_cls:
@@ -282,6 +280,46 @@ class TestCreateMealPlanEntry:
             "entryType": "dinner",
             "recipeId": "uuid-spag-001",
         }
+
+    @pytest.mark.asyncio
+    async def test_create_meal_plan_entry_with_title(self):
+        """Text-only entry when no recipe is linked (e.g. import failed)."""
+        mock_client = AsyncMock()
+        mock_client.post.return_value = _mock_response({"id": "plan-456"})
+
+        with patch("app.tools.mealie.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await _create_meal_plan_entry(
+                _settings(),
+                date="2026-03-13",
+                entry_type="lunch",
+                title="Italiaanse mini croques",
+            )
+
+        assert result == {
+            "success": True,
+            "date": "2026-03-13",
+            "entry_type": "lunch",
+            "title": "Italiaanse mini croques",
+        }
+        mock_client.post.assert_called_once()
+        call_kwargs = mock_client.post.call_args
+        assert call_kwargs.kwargs["json"] == {
+            "date": "2026-03-13",
+            "entryType": "lunch",
+            "title": "Italiaanse mini croques",
+        }
+
+    @pytest.mark.asyncio
+    async def test_create_meal_plan_entry_no_slug_or_title(self):
+        """Error when neither recipe_slug nor title provided."""
+        result = await _create_meal_plan_entry(
+            _settings(),
+            date="2026-03-01",
+            entry_type="dinner",
+        )
+        assert result == {"error": "Either recipe_slug or title is required"}
 
     @pytest.mark.asyncio
     async def test_create_meal_plan_entry_slug_not_found(self):
@@ -481,13 +519,11 @@ class TestRegisterMealieTools:
         assert "slug" in detail_def["input_schema"]["properties"]
         assert "slug" in detail_def["input_schema"]["required"]
 
-        # Verify create_meal_plan_entry has all 3 required params
+        # Verify create_meal_plan_entry requires date+entry_type, slug+title optional
         mp_def = next(d for d in defs if d["name"] == "create_meal_plan_entry")
-        assert set(mp_def["input_schema"]["required"]) == {
-            "date",
-            "entry_type",
-            "recipe_slug",
-        }
+        assert set(mp_def["input_schema"]["required"]) == {"date", "entry_type"}
+        assert "recipe_slug" in mp_def["input_schema"]["properties"]
+        assert "title" in mp_def["input_schema"]["properties"]
 
         # Verify add_to_shopping_list has required note, optional quantity
         add_def = next(d for d in defs if d["name"] == "add_to_shopping_list")

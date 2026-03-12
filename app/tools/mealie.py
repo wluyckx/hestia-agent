@@ -30,6 +30,7 @@ from app.tools.registry import ToolRegistry
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = httpx.Timeout(5.0, connect=3.0)
+_IMPORT_TIMEOUT = httpx.Timeout(30.0, connect=5.0)  # Scraping external sites can be slow
 
 
 def _headers(settings: Settings) -> dict[str, str]:
@@ -190,31 +191,43 @@ async def _resolve_recipe_id(
 
 
 async def _create_meal_plan_entry(
-    settings: Settings, *, date: str, entry_type: str, recipe_slug: str
+    settings: Settings,
+    *,
+    date: str,
+    entry_type: str,
+    recipe_slug: str = "",
+    title: str = "",
 ) -> dict:
-    """Create a meal plan entry for a specific date and meal type."""
+    """Create a meal plan entry — recipe-linked (via slug) or text-only (via title)."""
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            recipe_id = await _resolve_recipe_id(client, settings, recipe_slug)
-            if not recipe_id:
-                return {"error": f"Recipe not found: {recipe_slug}"}
+            body: dict = {"date": date, "entryType": entry_type}
+            if recipe_slug:
+                recipe_id = await _resolve_recipe_id(client, settings, recipe_slug)
+                if not recipe_id:
+                    return {"error": f"Recipe not found: {recipe_slug}"}
+                body["recipeId"] = recipe_id
+            elif title:
+                body["title"] = title
+            else:
+                return {"error": "Either recipe_slug or title is required"}
             resp = await client.post(
                 f"{settings.mealie_base_url}/api/households/mealplans",
                 headers=_headers(settings),
-                json={
-                    "date": date,
-                    "entryType": entry_type,
-                    "recipeId": recipe_id,
-                },
+                json=body,
             )
             resp.raise_for_status()
-            return {
+            result: dict = {
                 "success": True,
                 "date": date,
                 "entry_type": entry_type,
-                "recipe_slug": recipe_slug,
-                "recipe_id": recipe_id,
             }
+            if recipe_slug:
+                result["recipe_slug"] = recipe_slug
+                result["recipe_id"] = body["recipeId"]
+            else:
+                result["title"] = title
+            return result
     except Exception:
         logger.warning("Create meal plan entry failed", exc_info=True)
         return {"error": "Failed to create meal plan entry"}
@@ -272,7 +285,7 @@ async def _remove_from_shopping_list(settings: Settings, *, item_id: str) -> dic
 async def _import_recipe_from_url(settings: Settings, *, url: str) -> dict:
     """Import a recipe from a URL using Mealie's scraper, then fetch the recipe ID."""
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=_IMPORT_TIMEOUT) as client:
             resp = await client.post(
                 f"{settings.mealie_base_url}/api/recipes/create-url",
                 headers=_headers(settings),
@@ -346,7 +359,8 @@ def register_mealie_tools(registry: ToolRegistry, settings: Settings) -> None:
         name="create_meal_plan_entry",
         description=(
             "Create a meal plan entry for a specific date and meal type. "
-            "Describe the action before executing."
+            "Provide recipe_slug to link a Mealie recipe, or title for a text-only note "
+            "(e.g. when the recipe import failed). Describe the action before executing."
         ),
         parameters={
             "type": "object",
@@ -361,10 +375,14 @@ def register_mealie_tools(registry: ToolRegistry, settings: Settings) -> None:
                 },
                 "recipe_slug": {
                     "type": "string",
-                    "description": "Recipe slug to assign",
+                    "description": "Recipe slug to link (from search or import)",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Text-only title when no recipe is linked",
                 },
             },
-            "required": ["date", "entry_type", "recipe_slug"],
+            "required": ["date", "entry_type"],
         },
         handler=lambda **kwargs: _create_meal_plan_entry(settings, **kwargs),
     )
