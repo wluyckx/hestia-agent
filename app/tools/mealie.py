@@ -14,6 +14,8 @@ Registers eight tools with the ToolRegistry for Claude tool-use:
   - import_recipe_from_url: import a recipe via Mealie's scraper
 
 CHANGELOG:
+- 2026-03-12: Fix slug/ID mismatch — import returns recipe ID, create resolves slug→ID,
+  search and detail include recipe ID (URL-to-planner flow)
 - 2026-02-28: Add four write tools (STORY-039)
 - 2026-02-28: Initial creation — four read tools (STORY-037)
 """
@@ -50,6 +52,7 @@ async def _search_recipes(settings: Settings, *, query: str) -> dict:
             return {
                 "recipes": [
                     {
+                        "id": r.get("id", ""),
                         "name": r.get("name", ""),
                         "slug": r.get("slug", ""),
                         "description": r.get("description", ""),
@@ -156,7 +159,9 @@ async def _get_recipe_detail(settings: Settings, *, slug: str) -> dict:
                 elif isinstance(step, dict):
                     steps.append(step.get("text", str(step)))
             return {
+                "id": data.get("id", ""),
                 "name": data.get("name", ""),
+                "slug": data.get("slug", ""),
                 "description": data.get("description", ""),
                 "ingredients": ingredients,
                 "steps": steps,
@@ -168,19 +173,38 @@ async def _get_recipe_detail(settings: Settings, *, slug: str) -> dict:
         return {"error": "Recipe not found"}
 
 
+async def _resolve_recipe_id(
+    client: httpx.AsyncClient, settings: Settings, recipe_slug: str
+) -> str | None:
+    """Resolve a recipe slug to its UUID by fetching the recipe."""
+    try:
+        resp = await client.get(
+            f"{settings.mealie_base_url}/api/recipes/{recipe_slug}",
+            headers=_headers(settings),
+        )
+        resp.raise_for_status()
+        return resp.json().get("id")
+    except Exception:
+        logger.warning("Recipe ID resolve failed for slug=%s", recipe_slug, exc_info=True)
+        return None
+
+
 async def _create_meal_plan_entry(
     settings: Settings, *, date: str, entry_type: str, recipe_slug: str
 ) -> dict:
     """Create a meal plan entry for a specific date and meal type."""
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            recipe_id = await _resolve_recipe_id(client, settings, recipe_slug)
+            if not recipe_id:
+                return {"error": f"Recipe not found: {recipe_slug}"}
             resp = await client.post(
                 f"{settings.mealie_base_url}/api/households/mealplans",
                 headers=_headers(settings),
                 json={
                     "date": date,
                     "entryType": entry_type,
-                    "recipeId": recipe_slug,
+                    "recipeId": recipe_id,
                 },
             )
             resp.raise_for_status()
@@ -189,6 +213,7 @@ async def _create_meal_plan_entry(
                 "date": date,
                 "entry_type": entry_type,
                 "recipe_slug": recipe_slug,
+                "recipe_id": recipe_id,
             }
     except Exception:
         logger.warning("Create meal plan entry failed", exc_info=True)
@@ -245,7 +270,7 @@ async def _remove_from_shopping_list(settings: Settings, *, item_id: str) -> dic
 
 
 async def _import_recipe_from_url(settings: Settings, *, url: str) -> dict:
-    """Import a recipe from a URL using Mealie's scraper."""
+    """Import a recipe from a URL using Mealie's scraper, then fetch the recipe ID."""
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.post(
@@ -255,7 +280,9 @@ async def _import_recipe_from_url(settings: Settings, *, url: str) -> dict:
             )
             resp.raise_for_status()
             slug = resp.json()
-            return {"success": True, "slug": slug}
+            # Fetch the imported recipe to get its UUID
+            recipe_id = await _resolve_recipe_id(client, settings, slug)
+            return {"success": True, "slug": slug, "id": recipe_id or ""}
     except Exception:
         logger.warning("Import recipe from URL failed", exc_info=True)
         return {"error": "Failed to import recipe"}

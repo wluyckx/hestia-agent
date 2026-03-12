@@ -2,6 +2,7 @@
 Tests for Mealie tool-use tools — read + write operations.
 
 CHANGELOG:
+- 2026-03-12: Update tests for slug/ID resolution fixes (URL-to-planner flow)
 - 2026-02-28: Add write tool tests (STORY-039)
 - 2026-02-28: Initial creation — 7 tests (STORY-037)
 """
@@ -58,11 +59,13 @@ class TestSearchRecipes:
             {
                 "items": [
                     {
+                        "id": "uuid-spag-001",
                         "name": "Spaghetti Bolognese",
                         "slug": "spaghetti-bolognese",
                         "description": "Classic Italian pasta",
                     },
                     {
+                        "id": "uuid-curry-002",
                         "name": "Chicken Curry",
                         "slug": "chicken-curry",
                         "description": "Spicy curry dish",
@@ -79,6 +82,7 @@ class TestSearchRecipes:
 
         assert "recipes" in result
         assert len(result["recipes"]) == 2
+        assert result["recipes"][0]["id"] == "uuid-spag-001"
         assert result["recipes"][0]["name"] == "Spaghetti Bolognese"
         assert result["recipes"][0]["slug"] == "spaghetti-bolognese"
         assert result["recipes"][1]["name"] == "Chicken Curry"
@@ -190,7 +194,9 @@ class TestGetRecipeDetail:
         mock_client = AsyncMock()
         mock_client.get.return_value = _mock_response(
             {
+                "id": "uuid-spag-001",
                 "name": "Spaghetti Bolognese",
+                "slug": "spaghetti-bolognese",
                 "description": "Classic Italian pasta with meat sauce",
                 "recipeIngredient": [
                     {"display": "500g spaghetti"},
@@ -212,7 +218,9 @@ class TestGetRecipeDetail:
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             result = await _get_recipe_detail(_settings(), slug="spaghetti-bolognese")
 
+        assert result["id"] == "uuid-spag-001"
         assert result["name"] == "Spaghetti Bolognese"
+        assert result["slug"] == "spaghetti-bolognese"
         assert result["description"] == "Classic Italian pasta with meat sauce"
         assert len(result["ingredients"]) == 3
         assert result["ingredients"][0] == "500g spaghetti"
@@ -241,8 +249,13 @@ class TestCreateMealPlanEntry:
 
     @pytest.mark.asyncio
     async def test_create_meal_plan_entry_success(self):
-        """Mock POST — verify body sent and success response."""
+        """Mock GET (slug→ID) + POST — verify resolved ID in body."""
         mock_client = AsyncMock()
+        # First call: GET recipe by slug to resolve ID
+        mock_client.get.return_value = _mock_response(
+            {"id": "uuid-spag-001", "name": "Spaghetti Bolognese", "slug": "spaghetti-bolognese"}
+        )
+        # Second call: POST meal plan entry
         mock_client.post.return_value = _mock_response({"id": "plan-123"})
 
         with patch("app.tools.mealie.httpx.AsyncClient") as mock_cls:
@@ -260,19 +273,41 @@ class TestCreateMealPlanEntry:
             "date": "2026-03-01",
             "entry_type": "dinner",
             "recipe_slug": "spaghetti-bolognese",
+            "recipe_id": "uuid-spag-001",
         }
         mock_client.post.assert_called_once()
         call_kwargs = mock_client.post.call_args
         assert call_kwargs.kwargs["json"] == {
             "date": "2026-03-01",
             "entryType": "dinner",
-            "recipeId": "spaghetti-bolognese",
+            "recipeId": "uuid-spag-001",
         }
 
     @pytest.mark.asyncio
-    async def test_create_meal_plan_entry_failure(self):
-        """Verify error dict on API failure."""
+    async def test_create_meal_plan_entry_slug_not_found(self):
+        """Verify error when slug cannot be resolved to an ID."""
         mock_client = AsyncMock()
+        mock_client.get.return_value = _mock_response({}, status_code=404)
+
+        with patch("app.tools.mealie.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await _create_meal_plan_entry(
+                _settings(),
+                date="2026-03-01",
+                entry_type="dinner",
+                recipe_slug="nonexistent",
+            )
+
+        assert result == {"error": "Recipe not found: nonexistent"}
+
+    @pytest.mark.asyncio
+    async def test_create_meal_plan_entry_post_failure(self):
+        """Verify error dict when POST fails after successful slug resolve."""
+        mock_client = AsyncMock()
+        mock_client.get.return_value = _mock_response(
+            {"id": "uuid-001", "name": "Test", "slug": "test"}
+        )
         mock_client.post.return_value = _mock_response({}, status_code=500)
 
         with patch("app.tools.mealie.httpx.AsyncClient") as mock_cls:
@@ -282,7 +317,7 @@ class TestCreateMealPlanEntry:
                 _settings(),
                 date="2026-03-01",
                 entry_type="dinner",
-                recipe_slug="bad-slug",
+                recipe_slug="test",
             )
 
         assert result == {"error": "Failed to create meal plan entry"}
@@ -372,9 +407,13 @@ class TestImportRecipeFromUrl:
 
     @pytest.mark.asyncio
     async def test_import_recipe_from_url_success(self):
-        """Mock POST — verify URL in body and slug extraction."""
+        """Mock POST import + GET recipe — verify slug and ID returned."""
         mock_client = AsyncMock()
         mock_client.post.return_value = _mock_response("imported-recipe-slug")
+        # After import, resolves slug to UUID via GET
+        mock_client.get.return_value = _mock_response(
+            {"id": "uuid-imported-001", "name": "Imported Pasta", "slug": "imported-recipe-slug"}
+        )
 
         with patch("app.tools.mealie.httpx.AsyncClient") as mock_cls:
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -383,7 +422,11 @@ class TestImportRecipeFromUrl:
                 _settings(), url="https://example.com/recipe/pasta"
             )
 
-        assert result == {"success": True, "slug": "imported-recipe-slug"}
+        assert result == {
+            "success": True,
+            "slug": "imported-recipe-slug",
+            "id": "uuid-imported-001",
+        }
         mock_client.post.assert_called_once()
         post_kwargs = mock_client.post.call_args
         assert post_kwargs.kwargs["json"] == {
