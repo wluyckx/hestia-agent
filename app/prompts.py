@@ -5,11 +5,14 @@ Centralizes all prompt construction — chat.py imports build_system_prompt()
 instead of hardcoding prompt strings.
 
 CHANGELOG:
+- 2026-03-12: Inject current date + weekday into system prompt (date-relative fix)
 - 2026-02-28: Proactive greeting insights (STORY-047/048/049)
 - 2026-02-28: Add preferences injection (STORY-045)
 - 2026-02-28: Add greeting prompt (STORY-043)
 - 2026-02-28: Initial creation — enriched system prompt (STORY-034)
 """
+
+from datetime import UTC, datetime
 
 from app.backends import BackendData
 
@@ -137,10 +140,17 @@ def build_system_prompt(
     Returns:
         Complete system prompt string.
     """
+    now = datetime.now(UTC)
+    date_line = (
+        f"\n**Current date**: {now.strftime('%A, %d/%m/%Y')} "
+        f"({now.strftime('%Y-%m-%d')}, {now.strftime('%H:%M')} UTC)\n"
+    )
+
     parts = [
         _IDENTITY,
         _SAFETY,
         _DEEP_LINKS,
+        date_line,
         _build_tool_section(tool_descriptions),
         _build_preferences_section(preferences or []),
         _build_context_block(backend_data),

@@ -141,5 +141,17 @@ class TestBuiltinGetCurrentTime:
         registry = create_default_registry()
         result = await registry.execute("get_current_time", {})
         assert "iso" in result
+        assert "date" in result
+        assert "weekday" in result
         assert "timezone" in result
         assert result["timezone"] == "UTC"
+        # weekday should be a full day name
+        assert result["weekday"] in {
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday",
+        }

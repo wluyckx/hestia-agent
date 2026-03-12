@@ -43,6 +43,13 @@ class TestSystemPromptSections:
         # Should not mention "Available tools" section when no tools registered
         assert "Available tools" not in prompt
 
+    def test_contains_current_date_and_weekday(self):
+        prompt = build_system_prompt(BackendData(), tool_descriptions=[])
+        assert "Current date" in prompt
+        # Must contain a weekday name so Claude can resolve "Saturday" etc.
+        weekdays = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
+        assert any(day in prompt for day in weekdays)
+
 
 class TestSystemPromptDataInjection:
     """Verify live data context block is injected correctly."""

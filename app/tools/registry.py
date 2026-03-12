@@ -2,6 +2,7 @@
 Tool registry — register, look up, and execute tools for Claude tool-use.
 
 CHANGELOG:
+- 2026-03-12: Add weekday + date to get_current_time response (date-relative fix)
 - 2026-02-28: Initial creation — registry + get_current_time (STORY-035)
 """
 
@@ -116,10 +117,12 @@ class ToolRegistry:
 
 
 async def _get_current_time() -> dict:
-    """Return current UTC time."""
+    """Return current UTC time with weekday for date-relative reasoning."""
     now = datetime.now(UTC)
     return {
         "iso": now.isoformat(),
+        "date": now.strftime("%Y-%m-%d"),
+        "weekday": now.strftime("%A"),
         "timezone": "UTC",
     }
 
