@@ -11,7 +11,7 @@ from fastapi import FastAPI
 
 from app.database import init_db
 from app.dependencies import get_settings
-from app.routers import auth, chat, conversations, greeting, health, whisper
+from app.routers import auth, chat, conversations, greeting, health, tts, whisper
 
 
 @asynccontextmanager
@@ -38,3 +38,4 @@ app.include_router(chat.router)
 app.include_router(conversations.router)
 app.include_router(greeting.router)
 app.include_router(whisper.router)
+app.include_router(tts.router)

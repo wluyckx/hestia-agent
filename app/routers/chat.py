@@ -8,6 +8,7 @@ conversation — tool execution is invisible to the frontend.
 PWA contract: src/lib/api/agent.ts — streamChat / ChatSSEChunk
 
 CHANGELOG:
+- 2026-03-13: Support recipe_context for cooking mode chat (STORY-065)
 - 2026-02-28: Auto-summarize long conversations (STORY-046)
 - 2026-02-28: Register memory tools + inject preferences (STORY-045)
 - 2026-02-28: Register shopping analytics tools in tool-use loop (STORY-038)
@@ -33,6 +34,7 @@ from app.config import Settings
 from app.dependencies import get_current_user, get_db, get_settings
 from app.models import ChatRequest
 from app.prompts import build_system_prompt
+from app.tools.cooking import register_cooking_tools
 from app.tools.cross_domain import register_cross_domain_tools
 from app.tools.energy import register_energy_tools
 from app.tools.mealie import register_mealie_tools
@@ -218,6 +220,20 @@ async def chat(
     tool_descriptions = registry.get_tool_descriptions()
     system_prompt = build_system_prompt(backend_data, tool_descriptions, preferences=preferences)
 
+    # Cooking mode: register cooking tools and inject recipe context
+    if body.recipe_context:
+        register_cooking_tools(registry)
+
+    if body.recipe_context:
+        recipe_ctx = json.dumps(body.recipe_context, ensure_ascii=False)
+        system_prompt += (
+            "\n\n--- COOKING MODE ---\n"
+            "The user is actively cooking the following recipe. "
+            "They may ask about substitutions, techniques, conversions, or timing. "
+            "Answer concisely — their hands are busy.\n\n"
+            f"Recipe: {recipe_ctx}"
+        )
+
     # Build messages for Claude — prepend summary if available
     summary = await _get_conversation_summary(db, body.conversation_id)
     messages = []
@@ -242,6 +258,7 @@ async def chat(
     async def event_stream():
         nonlocal messages
         full_response = ""
+        pending_actions: list[dict] = []
 
         try:
             # Tool-use loop: call Claude, execute tools, repeat
@@ -269,6 +286,15 @@ async def chat(
                                         "content": json.dumps(result),
                                     }
                                 )
+                                # Collect timer actions for PWA
+                                if block.name == "set_cooking_timer" and result.get("created"):
+                                    pending_actions.append(
+                                        {
+                                            "type": "timer",
+                                            "name": result["name"],
+                                            "duration_seconds": result["duration_seconds"],
+                                        }
+                                    )
                             except ToolError as e:
                                 logger.warning(
                                     "Tool %s failed: %s",
@@ -328,14 +354,15 @@ async def chat(
         except Exception:
             logger.warning("Summary failed for %s", body.conversation_id)
 
-        done_chunk = json.dumps(
-            {
-                "token": "",
-                "done": True,
-                "conversation_id": body.conversation_id,
-                "message_id": msg_id,
-            }
-        )
+        done_data: dict = {
+            "token": "",
+            "done": True,
+            "conversation_id": body.conversation_id,
+            "message_id": msg_id,
+        }
+        if pending_actions:
+            done_data["actions"] = pending_actions
+        done_chunk = json.dumps(done_data)
         yield f"data: {done_chunk}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

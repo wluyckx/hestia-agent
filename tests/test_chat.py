@@ -1,6 +1,7 @@
 """Tests for the chat SSE streaming endpoint with tool-use.
 
 CHANGELOG:
+- 2026-03-13: Add recipe context injection test (STORY-065)
 - 2026-02-28: Refactor mocks for tool-use loop (STORY-035)
 - 2026-02-28: Initial creation (STORY-034)
 """
@@ -439,3 +440,82 @@ async def test_chat_passes_tool_definitions(initialized_client):
     # At minimum, get_current_time should be registered
     tool_names = [t["name"] for t in tools]
     assert "get_current_time" in tool_names
+
+
+# ---- Cooking mode: recipe context (STORY-065) ----
+
+
+@pytest.mark.asyncio
+async def test_chat_recipe_context_injected_into_system_prompt(initialized_client):
+    """When recipe_context is provided, system prompt includes recipe data."""
+    responses = [_claude_response([_text_block("Use olive oil instead.")])]
+    mock_client = _mock_anthropic_client(responses)
+
+    recipe = {
+        "name": "Stoofvlees met frietjes",
+        "recipeIngredient": [{"note": "1 kg rundvlees"}],
+        "recipeInstructions": [{"text": "Snijd het vlees in blokken."}],
+    }
+
+    with (
+        patch(
+            "app.routers.chat.anthropic.AsyncAnthropic",
+            return_value=mock_client,
+        ),
+        patch(
+            _MOCK_FETCH_ALL,
+            new_callable=AsyncMock,
+            return_value=_EMPTY_DATA,
+        ),
+    ):
+        resp = await initialized_client.post(
+            "/chat",
+            json={
+                "message": "Can I substitute butter for oil?",
+                "conversation_id": "cooking-test",
+                "history": [],
+                "recipe_context": recipe,
+            },
+            headers=auth_headers(),
+        )
+
+    assert resp.status_code == 200
+
+    # Verify system prompt contains recipe data and cooking mode marker
+    call_kwargs = mock_client.messages.create.call_args[1]
+    system = call_kwargs["system"]
+    assert "COOKING MODE" in system
+    assert "Stoofvlees met frietjes" in system
+    assert "rundvlees" in system
+
+
+@pytest.mark.asyncio
+async def test_chat_no_recipe_context_no_cooking_mode(initialized_client):
+    """Without recipe_context, system prompt does not include cooking mode."""
+    responses = [_claude_response([_text_block("Hello")])]
+    mock_client = _mock_anthropic_client(responses)
+
+    with (
+        patch(
+            "app.routers.chat.anthropic.AsyncAnthropic",
+            return_value=mock_client,
+        ),
+        patch(
+            _MOCK_FETCH_ALL,
+            new_callable=AsyncMock,
+            return_value=_EMPTY_DATA,
+        ),
+    ):
+        await initialized_client.post(
+            "/chat",
+            json={
+                "message": "Hello",
+                "conversation_id": "normal-chat",
+                "history": [],
+            },
+            headers=auth_headers(),
+        )
+
+    call_kwargs = mock_client.messages.create.call_args[1]
+    system = call_kwargs["system"]
+    assert "COOKING MODE" not in system

@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     mealie_base_url: str = "http://mealie:9000"
     mealie_token: str = ""
 
+    # Piper TTS (OpenedAI Speech container)
+    piper_base_url: str = "http://openedai-speech:8000"
+
     # Database
     database_path: str = "data/hestia.db"
 

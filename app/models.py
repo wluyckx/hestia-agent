@@ -87,6 +87,10 @@ class ChatRequest(BaseModel):
     message: str
     conversation_id: str
     history: list[HistoryMessage] = Field(default_factory=list)
+    recipe_context: dict | None = Field(
+        default=None,
+        description="Recipe JSON for cooking mode — injected into system prompt",
+    )
 
 
 # ---- Greeting ----
