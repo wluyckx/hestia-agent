@@ -106,8 +106,8 @@ async def greeting(
     energy_export_kwh = 0.0
     if data.energy:
         power_w = data.energy.get("power_w", 0)
-        energy_import_kwh = data.energy.get("energy_import_kwh", 0.0)
-        energy_export_kwh = data.energy.get("energy_export_kwh", 0.0)
+        energy_import_kwh = data.energy.get("import_kwh", 0.0)
+        energy_export_kwh = data.energy.get("export_kwh", 0.0)
     if data.solar:
         daily_solar_kwh = data.solar.get("pv_daily_kwh", 0.0)
         battery_soc = data.solar.get("battery_soc_pct", 0)

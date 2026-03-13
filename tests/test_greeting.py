@@ -151,7 +151,7 @@ async def test_greeting_structured_data_with_claude(initialized_client):
     """Verify all structured data fields populated correctly with Claude greeting."""
     mock_dt = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
     mock_data = BackendData(
-        energy={"power_w": 1500},
+        energy={"power_w": 1500, "import_kwh": 8.3, "export_kwh": 2.1},
         solar={"pv_power_w": 3200, "battery_soc_pct": 85, "pv_daily_kwh": 12.5},
         spending={"total_cents": 45230, "currency": "EUR"},
         meals=[
@@ -175,6 +175,8 @@ async def test_greeting_structured_data_with_claude(initialized_client):
     data = resp.json()
     assert data["greeting"] == "Great afternoon!"
     assert data["energy"]["power_w"] == 1500
+    assert data["energy"]["energy_import_kwh"] == 8.3
+    assert data["energy"]["energy_export_kwh"] == 2.1
     assert data["energy"]["battery_soc"] == 85
     assert data["energy"]["daily_solar_kwh"] == 12.5
     assert data["dinner"]["name"] == "Pasta"
