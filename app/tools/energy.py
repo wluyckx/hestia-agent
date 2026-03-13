@@ -9,6 +9,7 @@ Provides four tools:
 
 CHANGELOG:
 - 2026-02-28: Add capacity tariff peak tracking tool (STORY-044)
+- 2026-03-13: Fix field name mismatch — energy_import_kwh, energy_export_kwh, ts
 - 2026-02-28: Initial creation — energy tools (STORY-036)
 """
 
@@ -39,9 +40,9 @@ async def _get_energy_realtime(settings: Settings) -> dict:
             data = resp.json()
             return {
                 "power_w": data.get("power_w", 0),
-                "import_kwh": data.get("import_kwh", 0.0),
-                "export_kwh": data.get("export_kwh", 0.0),
-                "timestamp": data.get("timestamp", ""),
+                "import_kwh": data.get("energy_import_kwh", 0.0),
+                "export_kwh": data.get("energy_export_kwh", 0.0),
+                "timestamp": data.get("ts", ""),
             }
     except Exception:
         logger.warning("Failed to fetch energy realtime data", exc_info=True)

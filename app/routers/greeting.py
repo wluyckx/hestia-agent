@@ -8,7 +8,7 @@ static greeting if Claude call fails.
 PWA contract: src/lib/api/agent.ts — GreetingResponse
 
 CHANGELOG:
-- 2026-03-13: Add energy_import_kwh + energy_export_kwh to EnergyInfo (fix 0.0 kWh tile)
+- 2026-03-13: Use /v1/daily-energy for today's import/export kWh (fix 0.0 kWh tile)
 - 2026-02-28: Proactive spending alerts, energy insights, meal suggestions (STORY-047/048/049)
 - 2026-02-28: Claude-generated intelligent greeting (STORY-043)
 """
@@ -98,7 +98,7 @@ async def greeting(
     if not greeting_text:
         greeting_text = static_greeting
 
-    # Energy: merge P1 + solar data
+    # Energy: merge P1 realtime + daily-energy + solar data
     power_w = 0
     daily_solar_kwh = 0.0
     battery_soc = 0
@@ -106,8 +106,9 @@ async def greeting(
     energy_export_kwh = 0.0
     if data.energy:
         power_w = data.energy.get("power_w", 0)
-        energy_import_kwh = data.energy.get("import_kwh", 0.0)
-        energy_export_kwh = data.energy.get("export_kwh", 0.0)
+    if data.daily_energy:
+        energy_import_kwh = data.daily_energy.get("import_today_kwh", 0.0)
+        energy_export_kwh = data.daily_energy.get("export_today_kwh", 0.0)
     if data.solar:
         daily_solar_kwh = data.solar.get("pv_daily_kwh", 0.0)
         battery_soc = data.solar.get("battery_soc_pct", 0)

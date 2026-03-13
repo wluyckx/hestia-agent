@@ -56,9 +56,9 @@ async def test_get_energy_realtime_success():
     mock_client.get.return_value = _mock_response(
         {
             "power_w": 1500,
-            "import_kwh": 12345.6,
-            "export_kwh": 789.0,
-            "timestamp": "2026-02-28T12:00:00Z",
+            "energy_import_kwh": 12345.6,
+            "energy_export_kwh": 789.0,
+            "ts": "2026-02-28T12:00:00Z",
         }
     )
 

@@ -25,6 +25,7 @@ class BackendData:
     solar: dict | None = None
     spending: dict | None = None
     meals: list | None = None
+    daily_energy: dict | None = None
 
 
 async def fetch_energy(settings: Settings) -> dict | None:
@@ -99,17 +100,42 @@ async def fetch_meals(settings: Settings) -> list | None:
         return None
 
 
+async def fetch_daily_energy(settings: Settings) -> dict | None:
+    """GET /v1/daily-energy from P1 energy API (today's import/export delta)."""
+    if not settings.energy_token:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.get(
+                f"{settings.energy_base_url}/v1/daily-energy",
+                params={"device_id": settings.energy_device_id},
+                headers={"Authorization": f"Bearer {settings.energy_token}"},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception:
+        logger.warning("Failed to fetch daily energy data", exc_info=True)
+        return None
+
+
 async def fetch_all(settings: Settings) -> BackendData:
     """Fetch all backend data concurrently. Never raises."""
     import asyncio
 
-    energy, solar, spending, meals = await asyncio.gather(
+    energy, solar, spending, meals, daily_energy = await asyncio.gather(
         fetch_energy(settings),
         fetch_solar(settings),
         fetch_spending(settings),
         fetch_meals(settings),
+        fetch_daily_energy(settings),
     )
-    return BackendData(energy=energy, solar=solar, spending=spending, meals=meals)
+    return BackendData(
+        energy=energy,
+        solar=solar,
+        spending=spending,
+        meals=meals,
+        daily_energy=daily_energy,
+    )
 
 
 def build_context_block(data: BackendData) -> str:
