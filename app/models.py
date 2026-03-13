@@ -96,6 +96,8 @@ class EnergyInfo(BaseModel):
     power_w: int = 0
     daily_solar_kwh: float = 0.0
     battery_soc: float = 0.0
+    energy_import_kwh: float = 0.0
+    energy_export_kwh: float = 0.0
 
 
 class DinnerInfo(BaseModel):
