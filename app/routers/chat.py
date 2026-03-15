@@ -267,7 +267,7 @@ async def chat(
             "type": "url",
             "url": settings.mcp_shopping_db_url,
             "name": "shopping-db",
-            "authorization_token": f"Bearer {settings.mcp_shopping_db_token}",
+            "authorization_token": settings.mcp_shopping_db_token,
         })
 
     # Use beta API if MCP servers configured, otherwise standard API
