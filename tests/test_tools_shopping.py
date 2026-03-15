@@ -144,16 +144,16 @@ async def test_get_top_products_success():
 
 @pytest.mark.asyncio
 async def test_search_products_success():
-    """Mock response matching /v1/generic-products/search."""
+    """Mock response matching /v1/product-concepts/search."""
     mock_client = AsyncMock()
     mock_client.get.return_value = _mock_response(
         [
             {
-                "generic_product_id": 42,
-                "generic_product_name": "Champignons",
-                "name_nl": "Champignons",
-                "google_category": "produce",
-                "retail_product_count": 5,
+                "product_name": "BONI champignon extra fijn 500g",
+                "article_nr": "12345",
+                "concept_name": "Champignons",
+                "category_path": "Food > Vegetables > Mushrooms",
+                "purchase_count": 5,
                 "first_purchase": "2025-09-01T00:00:00",
                 "last_purchase": "2026-03-05T00:00:00",
             },
@@ -166,10 +166,11 @@ async def test_search_products_success():
         result = await _search_products(_settings(), query="champignons")
 
     assert len(result["products"]) == 1
-    assert result["products"][0]["name"] == "Champignons"
+    assert result["products"][0]["name"] == "BONI champignon extra fijn 500g"
+    assert result["products"][0]["concept"] == "Champignons"
     assert result["products"][0]["last_purchase"] == "2026-03-05T00:00:00"
-    call_kwargs = mock_client.get.call_args
-    assert call_kwargs.kwargs["params"]["q"] == "champignons"
+    call_url = mock_client.get.call_args.args[0]
+    assert "/v1/product-concepts/search" in call_url
 
 
 @pytest.mark.asyncio
@@ -184,18 +185,17 @@ async def test_search_products_no_key():
 
 @pytest.mark.asyncio
 async def test_get_recent_products_success():
-    """Mock response matching /v1/generic-products/recent."""
+    """Mock response matching /v1/product-concepts/recent."""
     mock_client = AsyncMock()
     mock_client.get.return_value = _mock_response(
         [
             {
-                "generic_product_id": 10,
-                "generic_product_name": "Banaan",
-                "name_nl": "Banaan",
-                "google_category": "produce",
+                "category_id": 1008316,
+                "concept_name": "Bananen",
+                "category_path": "Food > Fruits > Bananas",
                 "purchase_count": 3,
-                "unique_days": 2,
-                "last_purchased_at": "2026-03-11T15:00:00",
+                "last_purchased": "2026-03-11T15:00:00",
+                "top_product_names": ["CHIQUITA banaan", "BONI bananen"],
             },
         ]
     )
@@ -206,8 +206,11 @@ async def test_get_recent_products_success():
         result = await _get_recent_products(_settings(), days=5)
 
     assert len(result["products"]) == 1
-    assert result["products"][0]["name"] == "Banaan"
+    assert result["products"][0]["concept"] == "Bananen"
     assert result["products"][0]["last_purchased"] == "2026-03-11T15:00:00"
+    assert len(result["products"][0]["examples"]) == 2
+    call_url = mock_client.get.call_args.args[0]
+    assert "/v1/product-concepts/recent" in call_url
 
 
 # ---------- get_smart_shopping_list ----------
@@ -215,42 +218,49 @@ async def test_get_recent_products_success():
 
 @pytest.mark.asyncio
 async def test_get_smart_shopping_list_success():
-    """Mock response matching /v1/generic-smart-list/."""
+    """Mock response matching /v1/smart-list/."""
     mock_client = AsyncMock()
     mock_client.get.return_value = _mock_response(
         {
             "generated_at": "2026-03-12T18:00:00",
             "language": "nl",
-            "time_period_days": 90,
             "total_items": 3,
             "total_estimated_cost_cents": 5000,
             "urgent_items": [
                 {
-                    "generic_product_name": "Melk",
-                    "name_nl": "Melk",
+                    "category_id": 100,
+                    "concept_name": "Melk",
+                    "category_path": "Food > Beverages > Milk",
                     "urgency_level": "urgent",
-                    "purchase_reason": "6 days overdue",
+                    "purchase_reason": "Overdue by 6 days",
+                    "priority_score": 1.0,
                     "last_purchase_date": "2026-03-06",
                     "avg_purchase_interval_days": 7,
-                    "days_since_last_purchase": 6,
+                    "days_since_last_purchase": 13,
+                    "total_purchases": 30,
+                    "avg_unit_price_cents": 159,
                     "estimated_cost_cents": 159,
+                    "top_product_names": ["BONI volle melk PET 1L"],
                 },
             ],
             "high_priority": [
                 {
-                    "generic_product_name": "Eieren",
-                    "name_nl": "Eieren",
+                    "category_id": 200,
+                    "concept_name": "Eieren",
+                    "category_path": "Food > Eggs",
                     "urgency_level": "high",
-                    "purchase_reason": "Running low",
+                    "purchase_reason": "Due 3 days ago",
+                    "priority_score": 0.85,
                     "last_purchase_date": "2026-03-01",
                     "avg_purchase_interval_days": 14,
                     "days_since_last_purchase": 11,
+                    "total_purchases": 50,
+                    "avg_unit_price_cents": 349,
                     "estimated_cost_cents": 349,
+                    "top_product_names": ["BONI scharrelei M 12st"],
                 },
             ],
             "medium_priority": [],
-            "bulk_items": [],
-            "seasonal_items": [],
         }
     )
 
@@ -263,10 +273,11 @@ async def test_get_smart_shopping_list_success():
     assert len(result["urgent"]) == 1
     assert result["urgent"][0]["name"] == "Melk"
     assert result["urgent"][0]["urgency"] == "urgent"
+    assert result["urgent"][0]["examples"] == ["BONI volle melk PET 1L"]
     assert len(result["high_priority"]) == 1
     assert result["high_priority"][0]["name"] == "Eieren"
     call_url = mock_client.get.call_args.args[0]
-    assert "/v1/generic-smart-list/" in call_url
+    assert "/v1/smart-list/" in call_url
 
 
 # ---------- register_shopping_tools ----------

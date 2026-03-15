@@ -9,6 +9,7 @@ Registers five read-only tools with the ToolRegistry for Claude tool-use:
   - get_recent_products: recently purchased products
 
 CHANGELOG:
+- 2026-03-15: Switch to taxonomy-based endpoints (SHOP-TAX-008)
 - 2026-03-12: Rewrite tools to match actual ShoppingReceipts API endpoints
 - 2026-02-28: Initial creation — four shopping read tools (STORY-038)
 """
@@ -95,15 +96,15 @@ async def _get_top_products(settings: Settings, *, limit: int = 10) -> dict:
         return {"error": "Product data unavailable"}
 
 
-async def _search_products(settings: Settings, *, query: str, limit: int = 10) -> dict:
-    """Search generic products by name — returns purchase history dates."""
+async def _search_products(settings: Settings, *, query: str, limit: int = 10, language: str = "nl") -> dict:
+    """Search products by name — returns matching products with taxonomy concept name."""
     if err := _check_key(settings):
         return err
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.get(
-                f"{settings.shopping_base_url}/v1/generic-products/search",
-                params={"q": query, "limit": limit},
+                f"{settings.shopping_base_url}/v1/product-concepts/search",
+                params={"q": query, "limit": limit, "language": language},
                 headers=_headers(settings),
             )
             resp.raise_for_status()
@@ -112,11 +113,10 @@ async def _search_products(settings: Settings, *, query: str, limit: int = 10) -
             return {
                 "products": [
                     {
-                        "id": p.get("generic_product_id", ""),
-                        "name": p.get("generic_product_name", ""),
-                        "name_nl": p.get("name_nl", ""),
-                        "category": p.get("google_category", ""),
-                        "purchase_count": p.get("retail_product_count", 0),
+                        "name": p.get("product_name", ""),
+                        "concept": p.get("concept_name", ""),
+                        "category": p.get("category_path", ""),
+                        "purchase_count": p.get("purchase_count", 0),
                         "first_purchase": p.get("first_purchase", ""),
                         "last_purchase": p.get("last_purchase", ""),
                     }
@@ -128,15 +128,15 @@ async def _search_products(settings: Settings, *, query: str, limit: int = 10) -
         return {"error": "Product search unavailable"}
 
 
-async def _get_recent_products(settings: Settings, *, days: int = 7, limit: int = 20) -> dict:
-    """Get recently purchased generic products."""
+async def _get_recent_products(settings: Settings, *, days: int = 7, limit: int = 20, language: str = "nl") -> dict:
+    """Get recently purchased product concepts."""
     if err := _check_key(settings):
         return err
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.get(
-                f"{settings.shopping_base_url}/v1/generic-products/recent",
-                params={"days": days, "limit": limit, "language": "nl"},
+                f"{settings.shopping_base_url}/v1/product-concepts/recent",
+                params={"days": days, "limit": limit, "language": language},
                 headers=_headers(settings),
             )
             resp.raise_for_status()
@@ -145,12 +145,11 @@ async def _get_recent_products(settings: Settings, *, days: int = 7, limit: int 
             return {
                 "products": [
                     {
-                        "id": p.get("generic_product_id", ""),
-                        "name": p.get("generic_product_name", ""),
-                        "name_nl": p.get("name_nl", ""),
-                        "category": p.get("google_category", ""),
+                        "concept": p.get("concept_name", ""),
+                        "category": p.get("category_path", ""),
                         "purchase_count": p.get("purchase_count", 0),
-                        "last_purchased": p.get("last_purchased_at", ""),
+                        "last_purchased": p.get("last_purchased", ""),
+                        "examples": p.get("top_product_names", []),
                     }
                     for p in products
                 ]
@@ -161,13 +160,13 @@ async def _get_recent_products(settings: Settings, *, days: int = 7, limit: int 
 
 
 async def _get_smart_shopping_list(settings: Settings, *, language: str = "nl") -> dict:
-    """Get urgency-based smart shopping suggestions."""
+    """Get urgency-based smart shopping suggestions using taxonomy concepts."""
     if err := _check_key(settings):
         return err
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.get(
-                f"{settings.shopping_base_url}/v1/generic-smart-list/",
+                f"{settings.shopping_base_url}/v1/smart-list/",
                 params={"language": language},
                 headers=_headers(settings),
             )
@@ -177,14 +176,14 @@ async def _get_smart_shopping_list(settings: Settings, *, language: str = "nl") 
             def _extract_items(items: list) -> list[dict]:
                 return [
                     {
-                        "name": item.get("generic_product_name", ""),
-                        "name_nl": item.get("name_nl", ""),
+                        "name": item.get("concept_name", ""),
                         "urgency": item.get("urgency_level", ""),
                         "reason": item.get("purchase_reason", ""),
                         "last_purchased": item.get("last_purchase_date", ""),
                         "avg_interval_days": item.get("avg_purchase_interval_days", 0),
                         "days_since_last": item.get("days_since_last_purchase", 0),
                         "estimated_cost_cents": item.get("estimated_cost_cents", 0),
+                        "examples": item.get("top_product_names", []),
                     }
                     for item in items
                 ]
@@ -240,18 +239,22 @@ def register_shopping_tools(registry: ToolRegistry, settings: Settings) -> None:
         name="search_products",
         description=(
             "Search purchased products by name. Returns matching products with "
-            "first and last purchase dates — use this to answer 'when did I last buy X'"
+            "concept name and purchase dates — use to answer 'when did I last buy X'"
         ),
         parameters={
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Product name to search for (e.g., 'mushrooms', 'champignons')",
+                    "description": "Product name to search for (e.g., 'mushrooms', 'champignons', 'boter')",
                 },
                 "limit": {
                     "type": "integer",
                     "description": "Max results (default 10)",
+                },
+                "language": {
+                    "type": "string",
+                    "description": "Language for concept names: 'nl', 'fr', 'en' (default: nl)",
                 },
             },
             "required": ["query"],
@@ -261,7 +264,7 @@ def register_shopping_tools(registry: ToolRegistry, settings: Settings) -> None:
 
     registry.register(
         name="get_recent_products",
-        description="Get recently purchased products (last N days)",
+        description="Get recently purchased product concepts (last N days) with examples",
         parameters={
             "type": "object",
             "properties": {
@@ -273,6 +276,10 @@ def register_shopping_tools(registry: ToolRegistry, settings: Settings) -> None:
                     "type": "integer",
                     "description": "Max results (default 20)",
                 },
+                "language": {
+                    "type": "string",
+                    "description": "Language for concept names: 'nl', 'fr', 'en' (default: nl)",
+                },
             },
         },
         handler=lambda **kwargs: _get_recent_products(settings, **kwargs),
@@ -281,15 +288,15 @@ def register_shopping_tools(registry: ToolRegistry, settings: Settings) -> None:
     registry.register(
         name="get_smart_shopping_list",
         description=(
-            "Get smart shopping suggestions ranked by urgency — items you're likely "
-            "running low on based on purchase patterns"
+            "Get smart shopping suggestions ranked by urgency — product concepts you're "
+            "likely running low on based on purchase patterns"
         ),
         parameters={
             "type": "object",
             "properties": {
                 "language": {
                     "type": "string",
-                    "description": "Language for product names: 'nl', 'en', or 'ru' (default: nl)",
+                    "description": "Language for concept names: 'nl', 'fr', 'en' (default: nl)",
                 },
             },
         },
