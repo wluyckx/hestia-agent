@@ -123,10 +123,33 @@ def _build_preferences_section(preferences: list[dict]) -> str:
     return "\n".join(lines) + "\n"
 
 
+_MCP_DB_CONTEXT = """\
+## Shopping Database (MCP)
+
+You have direct read-only SQL access to the shopping database via the
+shopping-db MCP server. Use this for ad-hoc questions about purchases,
+spending, prices, and shopping patterns.
+
+Key tables:
+- `receipts`: store_id, purchase_ts, total_cents, xtra_savings_cents
+- `product_price_history`: article_nr, receipt_hash, product_name, unit_cents, line_total_cents, google_category_id
+- `stores`: store_id, brand (COLRUYT/OKAY/SPAR/BIO-PLANET/CRU/COLLECT&GO), city
+- `google_product_taxonomy`: category_id, category_name, category_path, parent_id
+- `google_category_translations`: category_id, locale (nl/fr/en), display_name
+- `smart_list_scores`: category_id, score, urgency_level, purchase_reason
+
+All monetary values are in cents (EUR). Timestamps are Europe/Brussels.
+Join product_price_history → google_product_taxonomy for category names.
+Join → google_category_translations for localised names (locale = 'nl').
+Join product_price_history → receipts → stores for store info.
+"""
+
+
 def build_system_prompt(
     backend_data: BackendData,
     tool_descriptions: list[dict],
     preferences: list[dict] | None = None,
+    mcp_enabled: bool = False,
 ) -> str:
     """Build the full system prompt from template sections.
 
@@ -136,6 +159,7 @@ def build_system_prompt(
             for registered tools. Empty list if no tools available yet.
         preferences: List of {"key": ..., "value": ...} dicts for stored
             household preferences. None or empty list if none set.
+        mcp_enabled: Whether MCP shopping-db server is configured.
 
     Returns:
         Complete system prompt string.
@@ -155,6 +179,9 @@ def build_system_prompt(
         _build_preferences_section(preferences or []),
         _build_context_block(backend_data),
     ]
+
+    if mcp_enabled:
+        parts.append(_MCP_DB_CONTEXT)
 
     return "\n".join(part for part in parts if part)
 

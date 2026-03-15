@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     # Piper TTS (OpenedAI Speech container)
     piper_base_url: str = "http://openedai-speech:8000"
 
+    # MCP — Shopping database read-only access via Postgres MCP server
+    mcp_shopping_db_url: str = ""  # https://hestia.wimluyckx.dev/mcp/shopping-db/
+    mcp_shopping_db_token: str = ""  # Bearer token for MCP auth
+
     # Database
     database_path: str = "data/hestia.db"
 

@@ -8,6 +8,7 @@ conversation — tool execution is invisible to the frontend.
 PWA contract: src/lib/api/agent.ts — streamChat / ChatSSEChunk
 
 CHANGELOG:
+- 2026-03-15: Add MCP shopping-db support via Anthropic beta connector (SHOP-MCP-002D)
 - 2026-03-13: Support recipe_context for cooking mode chat (STORY-065)
 - 2026-02-28: Auto-summarize long conversations (STORY-046)
 - 2026-02-28: Register memory tools + inject preferences (STORY-045)
@@ -218,7 +219,11 @@ async def chat(
 
     tool_defs = registry.get_definitions()
     tool_descriptions = registry.get_tool_descriptions()
-    system_prompt = build_system_prompt(backend_data, tool_descriptions, preferences=preferences)
+    system_prompt = build_system_prompt(
+        backend_data, tool_descriptions,
+        preferences=preferences,
+        mcp_enabled=bool(settings.mcp_shopping_db_url),
+    )
 
     # Cooking mode: register cooking tools and inject recipe context
     if body.recipe_context:
@@ -255,6 +260,20 @@ async def chat(
 
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
+    # Build MCP servers list if configured
+    mcp_servers: list[dict] = []
+    if settings.mcp_shopping_db_url:
+        mcp_servers.append({
+            "type": "url",
+            "url": settings.mcp_shopping_db_url,
+            "name": "shopping-db",
+            "authorization_token": f"Bearer {settings.mcp_shopping_db_token}",
+        })
+
+    # Use beta API if MCP servers configured, otherwise standard API
+    use_mcp = bool(mcp_servers)
+    mcp_extra_headers = {"anthropic-beta": "mcp-client-2025-04-04"} if use_mcp else {}
+
     async def event_stream():
         nonlocal messages
         full_response = ""
@@ -263,13 +282,21 @@ async def chat(
         try:
             # Tool-use loop: call Claude, execute tools, repeat
             for _round in range(MAX_TOOL_ROUNDS):
-                response = await client.messages.create(
-                    model=settings.claude_model,
-                    max_tokens=4096,
-                    system=system_prompt,
-                    messages=messages,
-                    tools=tool_defs if tool_defs else anthropic.NOT_GIVEN,
-                )
+                create_kwargs: dict = {
+                    "model": settings.claude_model,
+                    "max_tokens": 4096,
+                    "system": system_prompt,
+                    "messages": messages,
+                    "tools": tool_defs if tool_defs else anthropic.NOT_GIVEN,
+                }
+                if use_mcp:
+                    create_kwargs["mcp_servers"] = mcp_servers
+                    create_kwargs["extra_headers"] = mcp_extra_headers
+
+                if use_mcp:
+                    response = await client.beta.messages.create(**create_kwargs)
+                else:
+                    response = await client.messages.create(**create_kwargs)
 
                 # Check if Claude wants to use tools
                 if response.stop_reason == "tool_use":
